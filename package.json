@@ -1,0 +1,25 @@
+{
+  "name": "@meshpoint/cli",
+  "version": "1.0.0-alpha.0",
+  "description": "Meshpoint CLI and harness adapters",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "bin": { "meshpoint": "dist/bin.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@meshpoint/sdk": "file:../meshpoint-sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "4.1.12"
+  }
+}
