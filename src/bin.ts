@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { connectClaudeCode } from "./claude-code/connect.js";
 import { runClaudeCodeTap, type HookPayload } from "./claude-code/tap.js";
 import { configPath, loadConfig, repoContext, saveConfig, spoolDir } from "./config.js";
@@ -9,7 +10,9 @@ const USAGE = `meshpoint <command>
 
   login --base-url <url> --token <token>   store platform credentials (${configPath()})
   status                                   show config and the project for the current directory
-  connect claude-code [--remove]           install or remove the Claude Code hooks
+  connect claude-code [--project <dir>] [--remove]
+                                           install or remove the Claude Code hooks; --project writes
+                                           <dir>/.claude/settings.json instead of the global settings
   tap claude-code                          hook entry point; reads one Claude Code payload on stdin
 `;
 
@@ -42,7 +45,9 @@ async function main(argv: string[]): Promise<number> {
     }
     case "connect": {
       if (rest[0] !== "claude-code") throw new Error("connect supports: claude-code");
-      console.log(connectClaudeCode({ remove: rest.includes("--remove") }));
+      const project = flag(rest, "--project");
+      if (project !== undefined && !path.isAbsolute(project)) throw new Error("--project must be an absolute path");
+      console.log(connectClaudeCode({ remove: rest.includes("--remove"), ...(project ? { configDir: path.join(project, ".claude") } : {}) }));
       return 0;
     }
     case "tap": {

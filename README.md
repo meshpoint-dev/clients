@@ -4,7 +4,8 @@ The `meshpoint` CLI and harness adapters for Meshpoint 1.0. First adapter: Claud
 
 ```
 meshpoint login --base-url https://api.meshpoint.dev --token <agent token>
-meshpoint connect claude-code        # adds hooks to ~/.claude/settings.json
+meshpoint connect claude-code --project /abs/path/to/repo   # hooks in <repo>/.claude/settings.json only
+meshpoint connect claude-code        # global ~/.claude/settings.json (not until the adapter is signed off)
 meshpoint status                     # config + project id for the current repo
 meshpoint connect claude-code --remove
 ```
