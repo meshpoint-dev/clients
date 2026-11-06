@@ -4,6 +4,8 @@ import type { Checkpoints } from "./checkpoints.js";
 import type { Config, RepoContext } from "./config.js";
 
 export const ITEMS_MAX = 60;
+export const ID_PREFIX_CHARS = 8;
+const ALL_ITEMS_BUDGET = 100_000;
 const TITLE_MAX = 200;
 const BODY_MAX = 2000;
 
@@ -53,20 +55,45 @@ export function parseItems(raw: string): ItemDraft[] {
   });
 }
 
-export async function putItems(
-  drafts: ItemDraft[],
-  deps: { config: Config; repo: RepoContext; checkpoints: Checkpoints; now?: () => number; fetch?: typeof fetch },
-): Promise<{ count: number }> {
-  const now = deps.now ?? Date.now;
-  const client = new MeshpointClient({
+interface ItemDeps {
+  config: Config;
+  repo: RepoContext;
+  fetch?: typeof fetch;
+}
+
+function clientFor(deps: ItemDeps): MeshpointClient {
+  return new MeshpointClient({
     baseUrl: deps.config.baseUrl,
     token: deps.config.token,
     project: deps.repo.project,
     branch: deps.repo.branch,
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
   });
+}
+
+export async function putItems(drafts: ItemDraft[], deps: ItemDeps & { checkpoints: Checkpoints; now?: () => number }): Promise<{ count: number }> {
+  const now = deps.now ?? Date.now;
   const items: ItemInput[] = drafts.map((d) => ({ id: randomUUID(), ...d }));
-  const out = await client.putItems(items);
+  const out = await clientFor(deps).putItems(items);
   deps.checkpoints.markCheckpoint(deps.repo.project, deps.repo.branch, now());
   return out;
+}
+
+// The inject shows the first ID_PREFIX_CHARS of each id, so a retract takes a prefix and resolves it
+// against the branch's live items; an ambiguous or unknown prefix is an error, never a guess.
+export async function retractItems(prefixes: readonly string[], deps: ItemDeps): Promise<{ retracted: string[] }> {
+  if (prefixes.length === 0) throw new Error("retract needs at least one item id");
+  const client = clientFor(deps);
+  const { items } = await client.recall({ budget: ALL_ITEMS_BUDGET, fresh: true });
+  const ids = prefixes.map((prefix) => {
+    const matches = items.filter((i) => i.id.startsWith(prefix)).map((i) => i.id);
+    if (matches.length === 0) throw new Error(`no item on ${deps.repo.branch} starts with ${prefix}`);
+    if (matches.length > 1) throw new Error(`${prefix} matches ${matches.length} items; give more characters`);
+    return matches[0] as string;
+  });
+  const retracted: string[] = [];
+  for (const id of ids) {
+    if ((await client.retract(id)).found) retracted.push(id);
+  }
+  return { retracted };
 }

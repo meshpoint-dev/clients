@@ -2,6 +2,7 @@ import path from "node:path";
 import { MeshpointClient, type Presence, type RecallResponse } from "@meshpoint/sdk";
 import type { Config, RepoContext } from "../config.js";
 import type { Checkpoints } from "../checkpoints.js";
+import { ID_PREFIX_CHARS } from "../items.js";
 import { Spool, type SpooledTurn } from "../spool.js";
 import { SKILL_NAME } from "./skill.js";
 import { lastAssistantTurn, parseTranscript } from "./transcript.js";
@@ -156,8 +157,8 @@ export function renderInject(repo: RepoContext, recall: RecallResponse, presence
     lines.push("", `## Last checkpoint (${age(now - recall.checkpoint.created_at)})`, recall.checkpoint.body);
   }
   if (recall.items.length > 0) {
-    lines.push("", `## Team knowledge (${recall.items.length})`);
-    for (const i of recall.items) lines.push(`- [${i.kind}] ${i.title}: ${i.body}`);
+    lines.push("", `## Team knowledge (${recall.items.length}; first column is the item id)`);
+    for (const i of recall.items) lines.push(`- ${i.id.slice(0, ID_PREFIX_CHARS)} [${i.kind}] ${i.title}: ${i.body}`);
   }
   return lines.join("\n");
 }

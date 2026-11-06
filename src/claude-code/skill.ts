@@ -6,7 +6,7 @@ export const SKILL_NAME = "meshpoint";
 export const SKILL_MD = `---
 name: ${SKILL_NAME}
 description: Record what this session learned as Meshpoint team knowledge items. Use when a Meshpoint checkpoint is due, before ending a long session, or after a decision worth keeping.
-allowed-tools: Bash(meshpoint items put:*)
+allowed-tools: Bash(meshpoint items put:*), Bash(meshpoint items retract:*)
 ---
 
 # Meshpoint
@@ -30,6 +30,7 @@ Each item is an object \`{"kind", "title", "body"}\`. \`kind\` is one of:
 
 - Only what this session established. Never invent.
 - Skip anything already listed under "Team knowledge" in the session-start context unless it changed; a changed decision or status gets a new item.
+- Retract items that this session made wrong or obsolete: a finished todo, a superseded status, a reversed decision. The first column of "Team knowledge" is the item id.
 - Prefer durable knowledge over moment-to-moment detail. Aim for 5 to 30 items; one \`status\` item at most.
 - No secrets, tokens, or credentials.
 
@@ -41,6 +42,12 @@ Run \`meshpoint items put\` once, one \`--item kind title body\` per item. Singl
 meshpoint items put \\
   --item decision 'Short title' 'What was chosen and why, with file names and values.' \\
   --item gotcha 'Short title' 'What bit and how to avoid it.'
+\`\`\`
+
+Retract by id, several at once:
+
+\`\`\`bash
+meshpoint items retract 3f9c1a2b 7d0e44aa
 \`\`\`
 
 Then continue the work you were doing.

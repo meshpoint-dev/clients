@@ -5,7 +5,7 @@ import { connectClaudeCode } from "./claude-code/connect.js";
 import { runClaudeCodeTap, type HookPayload } from "./claude-code/tap.js";
 import { Checkpoints } from "./checkpoints.js";
 import { configPath, loadConfig, repoContext, saveConfig, spoolDir, stateDir } from "./config.js";
-import { parseItemArgs, parseItems, putItems } from "./items.js";
+import { parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
 import { Spool } from "./spool.js";
 
 const USAGE = `meshpoint <command>
@@ -19,6 +19,7 @@ const USAGE = `meshpoint <command>
   items put --file <path> | items put < items.json
                                            write items for the current repo and branch; the file or
                                            stdin form takes a JSON array of {kind, title, body}
+  items retract <id>...                    retract items on the current branch; an id may be a prefix
   tap claude-code                          hook entry point; reads one Claude Code payload on stdin
 `;
 
@@ -57,11 +58,15 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "items": {
-      if (rest[0] !== "put") throw new Error("items supports: put");
+      if (rest[0] !== "put" && rest[0] !== "retract") throw new Error("items supports: put, retract");
       const config = loadConfig();
       if (!config) throw new Error(`not logged in; run meshpoint login (${configPath()})`);
       const repo = repoContext(process.cwd());
       if (!repo) throw new Error("not inside a git repo with an origin remote");
+      if (rest[0] === "retract") {
+        console.log(JSON.stringify(await retractItems(rest.slice(1), { config, repo })));
+        return 0;
+      }
       const file = flag(rest, "--file");
       const drafts = rest.includes("--item") ? parseItemArgs(rest.slice(1)) : parseItems(file ? readFileSync(file, "utf8") : await readStdin());
       const out = await putItems(drafts, { config, repo, checkpoints: new Checkpoints(stateDir()) });

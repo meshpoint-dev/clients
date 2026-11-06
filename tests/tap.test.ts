@@ -84,7 +84,7 @@ describe("claude code tap", () => {
     expect(text).toContain("# Meshpoint: github.com--acme--web @ master");
     expect(text).toContain("- sam (agent-2, just now): src/x.ts");
     expect(text).toContain("## Last checkpoint (2m ago)\nwe were refactoring auth");
-    expect(text).toContain("- [decision] Use KV: edge speed");
+    expect(text).toContain("- d1 [decision] Use KV: edge speed");
   });
 
   it("spools prompt and reply turns and sends them once the spool is 60s old", async () => {
