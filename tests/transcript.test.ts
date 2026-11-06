@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lastAssistantTurn, lastUserText, parseTranscript, transcriptTail } from "../src/claude-code/transcript.js";
+import { lastAssistantTurn, lastUserText, parseTranscript } from "../src/claude-code/transcript.js";
 
 const line = (o: unknown) => JSON.stringify(o);
 const jsonl = [
@@ -16,7 +16,7 @@ describe("transcript", () => {
   it("keeps user prose, assistant text and touched paths; drops tool results and noise", () => {
     const entries = parseTranscript(jsonl);
     expect(entries.map((e) => e.role)).toEqual(["user", "assistant", "assistant", "assistant"]);
-    expect(entries[1]).toEqual({ role: "assistant", text: "Looking.", paths: ["/repo/src/a.ts"] });
+    expect(entries[1]).toEqual({ role: "assistant", text: "Looking.", paths: ["/repo/src/a.ts"], at: 0 });
   });
 
   it("joins the assistant reply since the last user prompt with deduplicated paths", () => {
@@ -24,11 +24,5 @@ describe("transcript", () => {
     expect(turn).toEqual({ text: "Looking.\n\nFixed in b.ts.", paths: ["/repo/src/a.ts", "/repo/src/b.ts"] });
     expect(lastUserText(parseTranscript(jsonl))).toBe("fix the bug");
     expect(lastAssistantTurn([])).toBeNull();
-  });
-
-  it("tails within a budget, newest first, in order", () => {
-    const tail = transcriptTail(parseTranscript(jsonl), 40);
-    expect(tail).toBe("[assistant]\nFixed in b.ts.");
-    expect(transcriptTail(parseTranscript(jsonl), 10_000)).toMatch(/^\[user\]\nfix the bug/);
   });
 });

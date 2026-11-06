@@ -5,6 +5,8 @@ export interface TranscriptEntry {
   role: "user" | "assistant";
   text: string;
   paths: string[];
+  // Epoch ms from the record's timestamp; 0 when absent.
+  at: number;
 }
 
 const PATH_KEYS = ["file_path", "path", "notebook_path"] as const;
@@ -45,7 +47,8 @@ export function parseTranscript(jsonl: string): TranscriptEntry[] {
     if (!text && paths.length === 0) continue;
     // Tool results arrive as "user" records with no prose; skip those so turns stay human.
     if (parsed.type === "user" && !text) continue;
-    entries.push({ role: parsed.type, text, paths });
+    const at = typeof parsed.timestamp === "string" ? Date.parse(parsed.timestamp) || 0 : 0;
+    entries.push({ role: parsed.type, text, paths, at });
   }
   return entries;
 }
@@ -69,19 +72,4 @@ export function lastUserText(entries: TranscriptEntry[]): string | null {
     if (e?.role === "user" && e.text) return e.text;
   }
   return null;
-}
-
-// Newest entries first until the budget is spent, returned in transcript order.
-export function transcriptTail(entries: TranscriptEntry[], budgetChars: number): string {
-  const parts: string[] = [];
-  let used = 0;
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const e = entries[i];
-    if (!e || !e.text) continue;
-    const part = `[${e.role}]\n${e.text}`;
-    if (used + part.length + 2 > budgetChars && parts.length > 0) break;
-    parts.unshift(part);
-    used += part.length + 2;
-  }
-  return parts.join("\n\n").slice(-budgetChars);
 }

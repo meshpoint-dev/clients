@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { connectClaudeCode } from "./claude-code/connect.js";
 import { runClaudeCodeTap, type HookPayload } from "./claude-code/tap.js";
-import { configPath, loadConfig, repoContext, saveConfig, spoolDir } from "./config.js";
+import { Checkpoints } from "./checkpoints.js";
+import { configPath, loadConfig, repoContext, saveConfig, spoolDir, stateDir } from "./config.js";
+import { parseItemArgs, parseItems, putItems } from "./items.js";
 import { Spool } from "./spool.js";
 
 const USAGE = `meshpoint <command>
@@ -11,8 +13,12 @@ const USAGE = `meshpoint <command>
   login --base-url <url> --token <token>   store platform credentials (${configPath()})
   status                                   show config and the project for the current directory
   connect claude-code [--project <dir>] [--remove]
-                                           install or remove the Claude Code hooks; --project writes
-                                           <dir>/.claude/settings.json instead of the global settings
+                                           install or remove the Claude Code hooks and checkpoint skill;
+                                           --project writes <dir>/.claude/ instead of the global ~/.claude/
+  items put --item <kind> <title> <body> [--item ...]
+  items put --file <path> | items put < items.json
+                                           write items for the current repo and branch; the file or
+                                           stdin form takes a JSON array of {kind, title, body}
   tap claude-code                          hook entry point; reads one Claude Code payload on stdin
 `;
 
@@ -50,6 +56,18 @@ async function main(argv: string[]): Promise<number> {
       console.log(connectClaudeCode({ remove: rest.includes("--remove"), ...(project ? { configDir: path.join(project, ".claude") } : {}) }));
       return 0;
     }
+    case "items": {
+      if (rest[0] !== "put") throw new Error("items supports: put");
+      const config = loadConfig();
+      if (!config) throw new Error(`not logged in; run meshpoint login (${configPath()})`);
+      const repo = repoContext(process.cwd());
+      if (!repo) throw new Error("not inside a git repo with an origin remote");
+      const file = flag(rest, "--file");
+      const drafts = rest.includes("--item") ? parseItemArgs(rest.slice(1)) : parseItems(file ? readFileSync(file, "utf8") : await readStdin());
+      const out = await putItems(drafts, { config, repo, checkpoints: new Checkpoints(stateDir()) });
+      console.log(JSON.stringify({ ...out, project: repo.project, branch: repo.branch }));
+      return 0;
+    }
     case "tap": {
       if (rest[0] !== "claude-code") throw new Error("tap supports: claude-code");
       const config = loadConfig();
@@ -69,6 +87,7 @@ async function main(argv: string[]): Promise<number> {
         repo: repoContext,
         readTranscript: (file) => readFileSync(file, "utf8"),
         spool: new Spool(spoolDir()),
+        checkpoints: new Checkpoints(stateDir()),
       });
       process.stdout.write(out);
       return 0;

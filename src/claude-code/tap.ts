@@ -1,8 +1,10 @@
 import path from "node:path";
 import { MeshpointClient, type Presence, type RecallResponse } from "@meshpoint/sdk";
 import type { Config, RepoContext } from "../config.js";
+import type { Checkpoints } from "../checkpoints.js";
 import { Spool, type SpooledTurn } from "../spool.js";
-import { lastAssistantTurn, parseTranscript, transcriptTail } from "./transcript.js";
+import { SKILL_NAME } from "./skill.js";
+import { lastAssistantTurn, parseTranscript } from "./transcript.js";
 
 export interface HookPayload {
   hook_event_name?: string;
@@ -13,6 +15,7 @@ export interface HookPayload {
   source?: string;
   trigger?: string;
   reason?: string;
+  stop_hook_active?: boolean;
 }
 
 export interface TapDeps {
@@ -20,13 +23,13 @@ export interface TapDeps {
   repo: (cwd: string) => RepoContext | null;
   readTranscript: (file: string) => string;
   spool: Spool;
+  checkpoints: Checkpoints;
   now?: () => number;
   fetch?: typeof fetch;
   // Longest the session-start inject waits for teammates after items have arrived.
   presenceWaitMs?: number;
 }
 
-export const CHECKPOINT_TAIL_CHARS = 20_000;
 const DEFAULT_PRESENCE_WAIT_MS = 1500;
 
 // One hook event in, one JSON answer for Claude Code out. Never throws past this boundary: a
@@ -64,12 +67,11 @@ export async function runClaudeCodeTap(payload: HookPayload, deps: TapDeps): Pro
     deps.spool.append(session, turn);
   };
 
-  const flush = async (force: boolean, checkpoint?: string): Promise<void> => {
-    if (!deps.spool.isDue(session, now(), force) && checkpoint === undefined) return;
+  const flush = async (force: boolean): Promise<void> => {
+    if (!deps.spool.isDue(session, now(), force)) return;
     const taken = deps.spool.take(session);
     const byBranch = new Map<string, SpooledTurn[]>();
     for (const t of taken.turns) byBranch.set(t.branch, [...(byBranch.get(t.branch) ?? []), t]);
-    if (checkpoint !== undefined && !byBranch.has(repo.branch)) byBranch.set(repo.branch, []);
     // The SDK reports a failed flush through onError instead of throwing.
     let failed = false;
     try {
@@ -78,7 +80,6 @@ export async function runClaudeCodeTap(payload: HookPayload, deps: TapDeps): Pro
           failed = true;
         });
         for (const t of turns) c.capture({ body: t.body, at: t.at, ...(t.paths ? { paths: t.paths } : {}) });
-        if (checkpoint !== undefined && branch === repo.branch) c.checkpoint(checkpoint);
         await c.close();
       }
     } catch {
@@ -106,14 +107,22 @@ export async function runClaudeCodeTap(payload: HookPayload, deps: TapDeps): Pro
         return "{}";
       }
       case "Stop": {
-        const turn = lastAssistantTurn(transcript());
+        const entries = transcript();
+        const turn = lastAssistantTurn(entries);
         if (turn) spoolTurn(`[assistant] ${turn.text}`, turn.paths);
         await flush(false);
-        return '{"decision":"continue"}';
+        // A due checkpoint keeps the turn going so the agent writes its items now. stop_hook_active
+        // means this Stop is already a continuation; never nudge twice in a row.
+        const due = payload.stop_hook_active ? null : deps.checkpoints.due(session, repo.project, repo.branch, entries);
+        if (!due) return '{"decision":"continue"}';
+        deps.checkpoints.markNudge(session, now());
+        return JSON.stringify({
+          decision: "block",
+          reason: `Meshpoint checkpoint due (${due.turns} replies since the last one). Run the ${SKILL_NAME} skill now, then continue.`,
+        });
       }
       case "PreCompact": {
-        const tail = transcriptTail(transcript(), CHECKPOINT_TAIL_CHARS);
-        await flush(true, tail || undefined);
+        await flush(true);
         return "{}";
       }
       case "SessionEnd": {

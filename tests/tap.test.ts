@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runClaudeCodeTap, type TapDeps } from "../src/claude-code/tap.js";
+import { CHECKPOINT_TURNS, Checkpoints } from "../src/checkpoints.js";
 import { FLUSH_AFTER_MS, Spool } from "../src/spool.js";
 
 type Call = { method: string; url: string; body: any };
@@ -11,6 +12,15 @@ let dir: string;
 let calls: Call[];
 let clock: number;
 let failCapture: boolean;
+
+const stamp = (offsetMs: number) => new Date(clock + offsetMs).toISOString();
+const replies = (n: number) =>
+  Array.from({ length: n }, (_, i) =>
+    [
+      JSON.stringify({ type: "user", timestamp: stamp((i - n) * 1000), message: { content: `prompt ${i}` } }),
+      JSON.stringify({ type: "assistant", timestamp: stamp((i - n) * 1000 + 500), message: { content: [{ type: "text", text: `reply ${i}` }] } }),
+    ].join("\n"),
+  ).join("\n");
 
 function deps(over: Partial<TapDeps> = {}): TapDeps {
   const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -42,6 +52,7 @@ function deps(over: Partial<TapDeps> = {}): TapDeps {
         JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Added." }, { type: "tool_use", input: { file_path: "/repo/tests/a.test.ts" } }] } }),
       ].join("\n"),
     spool: new Spool(dir),
+    checkpoints: new Checkpoints(dir),
     now: () => clock,
     fetch: fetchImpl as unknown as typeof fetch,
     presenceWaitMs: 50,
@@ -91,13 +102,13 @@ describe("claude code tap", () => {
     expect(d.spool.read("s1")).toHaveLength(0);
   });
 
-  it("flushes at once on session end and pre-compact, with the transcript tail as checkpoint", async () => {
+  it("flushes at once on session end and pre-compact, without a checkpoint body", async () => {
     const d = deps();
     await runClaudeCodeTap(payload("UserPromptSubmit", { prompt: "hi" }), d);
     await runClaudeCodeTap(payload("PreCompact", { trigger: "auto" }), d);
     const capture = calls.find((c) => c.url.includes("/v1/capture"));
     expect(capture?.body.turns).toHaveLength(1);
-    expect(capture?.body.checkpoint).toContain("[assistant]\nAdded.");
+    expect(capture?.body.checkpoint).toBeUndefined();
 
     await runClaudeCodeTap(payload("UserPromptSubmit", { prompt: "bye" }), d);
     expect(await runClaudeCodeTap(payload("SessionEnd", { reason: "exit" }), d)).toBe("{}");
@@ -117,5 +128,23 @@ describe("claude code tap", () => {
     expect(await runClaudeCodeTap(payload("SessionStart"), d)).toBe("{}");
     expect(await runClaudeCodeTap(payload("Stop"), d)).toBe('{"decision":"continue"}');
     expect(calls).toHaveLength(0);
+  });
+
+  it("nudges a checkpoint once enough replies pile up, then not again until the next pile", async () => {
+    const d = deps({ readTranscript: () => replies(CHECKPOINT_TURNS) });
+    const out = JSON.parse(await runClaudeCodeTap(payload("Stop"), d));
+    expect(out.decision).toBe("block");
+    expect(out.reason).toContain("meshpoint-checkpoint");
+    // The continuation Stop and every Stop after it pass until the counter refills.
+    expect(await runClaudeCodeTap(payload("Stop", { stop_hook_active: true }), d)).toBe('{"decision":"continue"}');
+    expect(await runClaudeCodeTap(payload("Stop"), d)).toBe('{"decision":"continue"}');
+  });
+
+  it("counts replies only after the branch's last checkpoint", async () => {
+    const d = deps({ readTranscript: () => replies(CHECKPOINT_TURNS + 5) });
+    d.checkpoints.markCheckpoint("github.com--acme--web", "master", clock - 1);
+    expect(await runClaudeCodeTap(payload("Stop"), d)).toBe('{"decision":"continue"}');
+    d.checkpoints.markCheckpoint("github.com--acme--web", "master", clock - 60_000);
+    expect(JSON.parse(await runClaudeCodeTap(payload("Stop"), d)).decision).toBe("block");
   });
 });

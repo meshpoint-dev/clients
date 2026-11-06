@@ -20,9 +20,9 @@ export interface ClaudeCodeSettings {
   readonly [key: string]: unknown;
 }
 
-// SessionStart skips the "compact" source: the session continues from its own summary there.
+// SessionStart includes "compact": the items are what survives a context loss.
 export const MANAGED_EVENTS: readonly { readonly event: string; readonly matcher?: string }[] = [
-  { event: "SessionStart", matcher: "startup|resume|clear" },
+  { event: "SessionStart", matcher: "startup|resume|clear|compact" },
   { event: "UserPromptSubmit" },
   { event: "Stop" },
   { event: "PreCompact" },

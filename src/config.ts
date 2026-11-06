@@ -36,8 +36,12 @@ export function saveConfig(config: Config, env: Environment = process.env, home 
   return file;
 }
 
+export function stateDir(env: Environment = process.env, home = homedir()): string {
+  return path.join(env.XDG_STATE_HOME ?? path.join(home, ".local", "state"), "meshpoint");
+}
+
 export function spoolDir(env: Environment = process.env, home = homedir()): string {
-  return path.join(env.XDG_STATE_HOME ?? path.join(home, ".local", "state"), "meshpoint", "spool");
+  return path.join(stateDir(env, home), "spool");
 }
 
 export interface RepoContext {
