@@ -1,7 +1,7 @@
 // The checkpoint skill: the agent distills its own session into items. Installed next to the hooks
 // so the Stop hook can ask for it by name.
 
-export const SKILL_NAME = "meshpoint-checkpoint";
+export const SKILL_NAME = "meshpoint";
 
 export const SKILL_MD = `---
 name: ${SKILL_NAME}
@@ -9,7 +9,7 @@ description: Record what this session learned as Meshpoint team knowledge items.
 allowed-tools: Bash(meshpoint items put:*)
 ---
 
-# Meshpoint checkpoint
+# Meshpoint
 
 Write the knowledge a teammate's agent would need to resume this work correctly, as items.
 

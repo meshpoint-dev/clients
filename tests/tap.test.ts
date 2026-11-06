@@ -134,7 +134,7 @@ describe("claude code tap", () => {
     const d = deps({ readTranscript: () => replies(CHECKPOINT_TURNS) });
     const out = JSON.parse(await runClaudeCodeTap(payload("Stop"), d));
     expect(out.decision).toBe("block");
-    expect(out.reason).toContain("meshpoint-checkpoint");
+    expect(out.reason).toContain("meshpoint");
     // The continuation Stop and every Stop after it pass until the counter refills.
     expect(await runClaudeCodeTap(payload("Stop", { stop_hook_active: true }), d)).toBe('{"decision":"continue"}');
     expect(await runClaudeCodeTap(payload("Stop"), d)).toBe('{"decision":"continue"}');

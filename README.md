@@ -20,7 +20,7 @@ Every hook runs `meshpoint tap claude-code` with the event payload on stdin.
 |---|---|
 | SessionStart (startup, resume, clear, compact) | `recall` for the repo's origin remote and branch, teammates fetched in the background (waits up to 1.5s), both rendered into `additionalContext`. |
 | UserPromptSubmit | prompt spooled as a `[user]` turn. |
-| Stop | the assistant reply since the last prompt spooled as an `[assistant]` turn, with the files it touched through tools as presence paths. When a checkpoint is due, the hook blocks the stop once and asks the agent to run the `meshpoint-checkpoint` skill. |
+| Stop | the assistant reply since the last prompt spooled as an `[assistant]` turn, with the files it touched through tools as presence paths. When a checkpoint is due, the hook blocks the stop once and asks the agent to run the `meshpoint` skill. |
 | PreCompact | spool sent now. |
 | SessionEnd | spool sent now. |
 
@@ -28,7 +28,7 @@ Turns are spooled to `~/.local/state/meshpoint/spool/<session>.jsonl` and sent o
 
 ## Checkpoints
 
-Distillation is agent-side: the platform runs no model. `connect` installs the `meshpoint-checkpoint` skill next to the hooks. The skill has the agent write what the session established as items of the fixed kinds (`decision`, `gotcha`, `convention`, `fact`, `status`, `todo`) through `meshpoint items put`, which records the time of the last checkpoint per project branch in `~/.local/state/meshpoint/checkpoints/`. The skill uses the `--item kind title body` argument form: Claude Code's command guard asks for approval on heredocs or JSON with quotes even when the command is allowlisted, while plain single-quoted arguments pass under the skill's `allowed-tools: Bash(meshpoint items put:*)`.
+Distillation is agent-side: the platform runs no model. `connect` installs the `meshpoint` skill next to the hooks. The skill has the agent write what the session established as items of the fixed kinds (`decision`, `gotcha`, `convention`, `fact`, `status`, `todo`) through `meshpoint items put`, which records the time of the last checkpoint per project branch in `~/.local/state/meshpoint/checkpoints/`. The skill uses the `--item kind title body` argument form: Claude Code's command guard asks for approval on heredocs or JSON with quotes even when the command is allowlisted, while plain single-quoted arguments pass under the skill's `allowed-tools: Bash(meshpoint items put:*)`.
 
 A checkpoint is due after 20 assistant replies or 60k chars of reply text since the later of the last checkpoint and the last nudge (`~/.local/state/meshpoint/nudges/<session>.json`). An ignored nudge is not repeated until the next pile. The benchmark behind this: one-shot items scored 0.67 resume correctness against 0.60 for a freeform summary and 0.32 for a transcript tail (ceiling 0.82).
 
