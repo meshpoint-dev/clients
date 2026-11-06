@@ -3,12 +3,16 @@
 
 export const SKILL_NAME = "meshpoint";
 
-export const SKILL_MD = `---
+// Claude Code pre-approves the two commands through the skill; Codex does it with a rules file.
+export function skillMarkdown(opts: { allowedTools: boolean }): string {
+  return `---
 name: ${SKILL_NAME}
 description: Record what this session learned as Meshpoint team knowledge items. Use when a Meshpoint checkpoint is due, before ending a long session, or after a decision worth keeping.
-allowed-tools: Bash(meshpoint items put:*), Bash(meshpoint items retract:*)
----
+${opts.allowedTools ? "allowed-tools: Bash(meshpoint items put:*), Bash(meshpoint items retract:*)\n" : ""}---
+${SKILL_BODY}`;
+}
 
+const SKILL_BODY = `
 # Meshpoint
 
 Write the knowledge a teammate's agent would need to resume this work correctly, as items.
@@ -52,3 +56,5 @@ meshpoint items retract 3f9c1a2b 7d0e44aa
 
 Then continue the work you were doing.
 `;
+
+export const SKILL_MD = skillMarkdown({ allowedTools: true });

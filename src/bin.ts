@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { connectClaudeCode } from "./claude-code/connect.js";
 import { runClaudeCodeTap, type HookPayload } from "./claude-code/tap.js";
+import { connectCodex } from "./codex/connect.js";
+import { parseCodexTranscript } from "./codex/transcript.js";
 import { Checkpoints } from "./checkpoints.js";
 import { configPath, loadConfig, repoContext, saveConfig, spoolDir, stateDir } from "./config.js";
 import { parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
@@ -15,12 +17,15 @@ const USAGE = `meshpoint <command>
   connect claude-code [--project <dir>] [--remove]
                                            install or remove the Claude Code hooks and checkpoint skill;
                                            --project writes <dir>/.claude/ instead of the global ~/.claude/
+  connect codex [--project <dir>] [--remove]
+                                           same for Codex: <dir>/.codex/{hooks.json,rules/meshpoint.rules}
+                                           and <dir>/.agents/skills/meshpoint (global: ~/.codex, ~/.agents)
   items put --item <kind> <title> <body> [--item ...]
   items put --file <path> | items put < items.json
                                            write items for the current repo and branch; the file or
                                            stdin form takes a JSON array of {kind, title, body}
   items retract <id>...                    retract items on the current branch; an id may be a prefix
-  tap claude-code                          hook entry point; reads one Claude Code payload on stdin
+  tap claude-code | tap codex              hook entry point; reads one hook payload on stdin
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -51,10 +56,12 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "connect": {
-      if (rest[0] !== "claude-code") throw new Error("connect supports: claude-code");
       const project = flag(rest, "--project");
       if (project !== undefined && !path.isAbsolute(project)) throw new Error("--project must be an absolute path");
-      console.log(connectClaudeCode({ remove: rest.includes("--remove"), ...(project ? { configDir: path.join(project, ".claude") } : {}) }));
+      const remove = rest.includes("--remove");
+      if (rest[0] === "claude-code") console.log(connectClaudeCode({ remove, ...(project ? { configDir: path.join(project, ".claude") } : {}) }));
+      else if (rest[0] === "codex") console.log(connectCodex({ remove, ...(project ? { projectDir: project } : {}) }));
+      else throw new Error("connect supports: claude-code, codex");
       return 0;
     }
     case "items": {
@@ -74,7 +81,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "tap": {
-      if (rest[0] !== "claude-code") throw new Error("tap supports: claude-code");
+      if (rest[0] !== "claude-code" && rest[0] !== "codex") throw new Error("tap supports: claude-code, codex");
       const config = loadConfig();
       const raw = await readStdin();
       let payload: HookPayload = {};
@@ -93,6 +100,7 @@ async function main(argv: string[]): Promise<number> {
         readTranscript: (file) => readFileSync(file, "utf8"),
         spool: new Spool(spoolDir()),
         checkpoints: new Checkpoints(stateDir()),
+        ...(rest[0] === "codex" ? { parseTranscript: parseCodexTranscript } : {}),
       });
       process.stdout.write(out);
       return 0;

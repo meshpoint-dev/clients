@@ -8,6 +8,7 @@ interface HookCommand {
   readonly type: "command";
   readonly command: string;
   readonly timeout?: number;
+  readonly [key: string]: unknown;
 }
 
 interface HookGroup {
@@ -29,8 +30,17 @@ export const MANAGED_EVENTS: readonly { readonly event: string; readonly matcher
   { event: "SessionEnd" },
 ];
 
+export interface TapHookSpec {
+  readonly command: string;
+  readonly events: readonly { readonly event: string; readonly matcher?: string }[];
+  // Extra handler fields, such as Codex's additionalContextLimit.
+  readonly extra?: Readonly<Record<string, unknown>>;
+}
+
+const CLAUDE_CODE_SPEC: TapHookSpec = { command: TAP_COMMAND, events: MANAGED_EVENTS };
+
 function isManaged(hook: HookCommand): boolean {
-  return hook.command.startsWith(TAP_COMMAND) || hook.command.startsWith("meshpoint-tap claude-code");
+  return hook.command.startsWith("meshpoint tap ") || hook.command.startsWith("meshpoint-tap ");
 }
 
 function withoutManaged(groups: readonly HookGroup[] | undefined): HookGroup[] {
@@ -39,12 +49,12 @@ function withoutManaged(groups: readonly HookGroup[] | undefined): HookGroup[] {
     .filter((group) => group.hooks.length > 0);
 }
 
-export function installTapHooks(settings: ClaudeCodeSettings): ClaudeCodeSettings {
+export function installTapHooks(settings: ClaudeCodeSettings, spec: TapHookSpec = CLAUDE_CODE_SPEC): ClaudeCodeSettings {
   const hooks: Record<string, readonly HookGroup[]> = { ...settings.hooks };
-  for (const { event, matcher } of MANAGED_EVENTS) {
+  for (const { event, matcher } of spec.events) {
     hooks[event] = [
       ...withoutManaged(hooks[event]),
-      { ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: "command", command: TAP_COMMAND, timeout: HOOK_TIMEOUT_S }] },
+      { ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: "command", command: spec.command, timeout: HOOK_TIMEOUT_S, ...spec.extra }] },
     ];
   }
   return { ...settings, hooks };

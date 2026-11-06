@@ -5,7 +5,7 @@ import type { Checkpoints } from "../checkpoints.js";
 import { ID_PREFIX_CHARS } from "../items.js";
 import { Spool, type SpooledTurn } from "../spool.js";
 import { SKILL_NAME } from "./skill.js";
-import { lastAssistantTurn, parseTranscript } from "./transcript.js";
+import { lastAssistantTurn, parseTranscript as parseClaudeCodeTranscript, type TranscriptEntry } from "./transcript.js";
 
 export interface HookPayload {
   hook_event_name?: string;
@@ -25,6 +25,8 @@ export interface TapDeps {
   readTranscript: (file: string) => string;
   spool: Spool;
   checkpoints: Checkpoints;
+  // Transcript reader for the harness; defaults to Claude Code's.
+  parseTranscript?: (jsonl: string) => TranscriptEntry[];
   now?: () => number;
   fetch?: typeof fetch;
   // Longest the session-start inject waits for teammates after items have arrived.
@@ -33,8 +35,9 @@ export interface TapDeps {
 
 const DEFAULT_PRESENCE_WAIT_MS = 1500;
 
-// One hook event in, one JSON answer for Claude Code out. Never throws past this boundary: a
-// broken mesh must not break the harness, so failures degrade to the empty answer.
+// One hook event in, one JSON answer out. Claude Code and Codex share the hook protocol (event
+// names, payload fields, additionalContext, Stop block), so one tap serves both. Never throws past
+// this boundary: a broken mesh must not break the harness, so failures degrade to the empty answer.
 export async function runClaudeCodeTap(payload: HookPayload, deps: TapDeps): Promise<string> {
   const event = payload.hook_event_name ?? "";
   const session = payload.session_id ?? "unknown";
@@ -56,7 +59,7 @@ export async function runClaudeCodeTap(payload: HookPayload, deps: TapDeps): Pro
   const transcript = () => {
     if (!payload.transcript_path) return [];
     try {
-      return parseTranscript(deps.readTranscript(payload.transcript_path));
+      return (deps.parseTranscript ?? parseClaudeCodeTranscript)(deps.readTranscript(payload.transcript_path));
     } catch {
       return [];
     }

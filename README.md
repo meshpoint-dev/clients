@@ -1,11 +1,12 @@
 # meshpoint clients
 
-The `meshpoint` CLI and harness adapters for Meshpoint 1.0. First adapter: Claude Code.
+The `meshpoint` CLI and harness adapters for Meshpoint 1.0. Adapters: Claude Code, Codex.
 
 ```
 meshpoint login --base-url https://api.meshpoint.dev --token <agent token>
 meshpoint connect claude-code --project /abs/path/to/repo   # hooks + skill in <repo>/.claude/ only
 meshpoint connect claude-code        # global ~/.claude/ (not until the adapter is signed off)
+meshpoint connect codex --project /abs/path/to/repo         # hooks, rules and skill under <repo>/.codex and .agents
 meshpoint status                     # config + project id for the current repo
 meshpoint items put --item gotcha 'title' 'body'   # write items for the current repo and branch
 meshpoint items put < items.json     # same, as a JSON array of {kind, title, body}
@@ -26,6 +27,10 @@ Every hook runs `meshpoint tap claude-code` with the event payload on stdin.
 | SessionEnd | spool sent now. |
 
 Turns are spooled to `~/.local/state/meshpoint/spool/<session>.jsonl` and sent once the oldest spooled turn is 60s old, so a session costs about one request per minute. A failed send keeps the spool for the next hook. Any failure degrades to an empty hook answer; the mesh never breaks the harness.
+
+## Codex
+
+Codex speaks the same hook protocol (event names, payload fields, `hookSpecificOutput.additionalContext`, Stop `decision: block`), so `meshpoint tap codex` is the same tap with a reader for Codex rollouts (`response_item` messages, `apply_patch` paths). `connect codex` writes three things: `.codex/hooks.json` (with `additionalContextLimit` raised from Codex's 2500-char default), `.codex/rules/meshpoint.rules` (prefix rules allowing `meshpoint items put` and `meshpoint items retract`; Codex has no per-skill `allowed-tools`, and "allow" also runs the command outside the sandbox so it can reach the platform), and `.agents/skills/meshpoint/SKILL.md`. Project `.codex/` files load only once the project is trusted, and Codex asks to review new hooks with `/hooks` before running them.
 
 ## Checkpoints
 
