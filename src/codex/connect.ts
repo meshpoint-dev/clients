@@ -71,5 +71,5 @@ export function connectCodex(opts: { remove: boolean; projectDir?: string; paths
   writeFileSync(paths.rules, RULES);
   mkdirSync(paths.skillDir, { recursive: true });
   writeFileSync(path.join(paths.skillDir, "SKILL.md"), skillMarkdown({ allowedTools: false }));
-  return `installed meshpoint hooks in ${paths.hooks}, rules in ${paths.rules} and ${paths.skillDir}/SKILL.md. Codex asks to trust new hooks on the next run (/hooks).`;
+  return `installed meshpoint hooks in ${paths.hooks}, rules in ${paths.rules} and ${paths.skillDir}/SKILL.md. Project .codex files load only once the project is trusted in config.toml; Codex asks to trust new hooks on the next run (/hooks).`;
 }
