@@ -3,7 +3,12 @@
 The `meshpoint` CLI and harness adapters for Meshpoint 1.0. Adapters: Claude Code, Codex.
 
 ```
-meshpoint login --base-url https://api.meshpoint.dev --token <agent token>
+meshpoint login                      # browser login through WorkOS AuthKit; 7-day agent token + refresh session
+meshpoint login --base-url https://meshpoint-platform-staging.cmptr.workers.dev   # staging
+meshpoint login --base-url <url> --token <agent token>   # pasted dev token instead
+meshpoint whoami                     # account, org, role
+meshpoint org | org invite <email> [--owner] | org invites | org remove <user> | org sessions | org revoke <id> | org rotate-key | org projects
+meshpoint logout
 meshpoint connect claude-code --project /abs/path/to/repo   # hooks + skill in <repo>/.claude/ only
 meshpoint connect claude-code        # global ~/.claude/ (not until the adapter is signed off)
 meshpoint connect codex --project /abs/path/to/repo         # hooks, rules and skill under <repo>/.codex and .agents
@@ -13,6 +18,10 @@ meshpoint items put < items.json     # same, as a JSON array of {kind, title, bo
 meshpoint items retract 3f9c1a2b     # retract by id or unique id prefix
 meshpoint connect claude-code --remove
 ```
+
+## Login
+
+`meshpoint login` listens on a random `127.0.0.1` port, opens `<base>/v1/auth/start?port&nonce&agent` in the browser, and the platform sends the browser back to that port with a one-time grant code after WorkOS AuthKit. The CLI exchanges the code for a 7-day agent token plus a 90-day refresh secret, stored in `~/.config/meshpoint/config.json` (mode 600). Every command refreshes the token when it has under a day left; the hook keeps the stored token if a refresh fails. The agent name defaults to `cli-<hostname>`.
 
 ## How the Claude Code adapter works
 

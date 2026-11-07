@@ -6,14 +6,28 @@ import { runClaudeCodeTap, type HookPayload } from "./claude-code/tap.js";
 import { connectCodex } from "./codex/connect.js";
 import { parseCodexTranscript } from "./codex/transcript.js";
 import { Checkpoints } from "./checkpoints.js";
-import { configPath, loadConfig, repoContext, saveConfig, spoolDir, stateDir } from "./config.js";
+import { configPath, deleteConfig, loadConfig, repoContext, saveConfig, spoolDir, stateDir, type Config } from "./config.js";
+import { api, freshConfig, login } from "./control.js";
 import { parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
 import { Spool } from "./spool.js";
 
 const USAGE = `meshpoint <command>
 
-  login --base-url <url> --token <token>   store platform credentials (${configPath()})
+  login [--base-url <url>] [--agent <name>] [--org <id>]
+                                           log in through the browser; stores tokens in ${configPath()}
+                                           (default base url: https://api.meshpoint.dev)
+  login --base-url <url> --token <token>   store a pasted agent token instead
+  logout                                   end the session and delete the stored tokens
+  whoami                                   account, org and role for the stored token
   status                                   show config and the project for the current directory
+  org                                      org, members and key ids
+  org invite <email> [--owner]             invite by email (owner only); accepted at their next login
+  org invites                              pending invites (owner only)
+  org remove <user-id>                     remove a member and revoke their sessions (owner only)
+  org sessions                             logged-in agents (own; all for owners)
+  org revoke <session-id>                  revoke a session
+  org rotate-key [--revoke-sessions]       rotate the org signing key (owner only)
+  org projects                             projects recorded for the org
   connect claude-code [--project <dir>] [--remove]
                                            install or remove the Claude Code hooks and checkpoint skill;
                                            --project writes <dir>/.claude/ instead of the global ~/.claude/
@@ -33,6 +47,44 @@ function flag(args: string[], name: string): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 
+const DEFAULT_BASE_URL = "https://api.meshpoint.dev";
+
+async function requireConfig(): Promise<Config> {
+  const config = loadConfig();
+  if (!config) throw new Error(`not logged in; run meshpoint login (${configPath()})`);
+  return freshConfig(config);
+}
+
+async function orgCommand(args: string[], config: Config): Promise<unknown> {
+  const call = (method: string, path: string, body?: unknown) => api(config.baseUrl, method, path, { token: config.token, ...(body === undefined ? {} : { body }) });
+  switch (args[0]) {
+    case undefined:
+      return call("GET", "/v1/org");
+    case "invite": {
+      if (!args[1]) throw new Error("org invite needs an email");
+      return call("POST", "/v1/org/invites", { email: args[1], role: args.includes("--owner") ? "owner" : "member" });
+    }
+    case "invites":
+      return call("GET", "/v1/org/invites");
+    case "remove": {
+      if (!args[1]) throw new Error("org remove needs a user id");
+      return call("DELETE", `/v1/org/members/${encodeURIComponent(args[1])}`);
+    }
+    case "sessions":
+      return call("GET", "/v1/org/sessions");
+    case "revoke": {
+      if (!args[1]) throw new Error("org revoke needs a session id");
+      return call("POST", "/v1/org/sessions/revoke", { id: args[1] });
+    }
+    case "rotate-key":
+      return call("POST", "/v1/org/keys/rotate", { revoke_sessions: args.includes("--revoke-sessions") });
+    case "projects":
+      return call("GET", "/v1/org/projects");
+    default:
+      throw new Error("org supports: invite, invites, remove, sessions, revoke, rotate-key, projects");
+  }
+}
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
@@ -43,10 +95,33 @@ async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   switch (cmd) {
     case "login": {
-      const baseUrl = flag(rest, "--base-url");
+      const baseUrl = flag(rest, "--base-url") ?? DEFAULT_BASE_URL;
       const token = flag(rest, "--token");
-      if (!baseUrl || !token) throw new Error("login needs --base-url and --token");
-      console.log(`saved ${saveConfig({ baseUrl, token })}`);
+      if (token) {
+        console.log(`saved ${saveConfig({ baseUrl, token })}`);
+        return 0;
+      }
+      const agent = flag(rest, "--agent");
+      const org = flag(rest, "--org");
+      const config = await login({ baseUrl, ...(agent ? { agent } : {}), ...(org ? { org } : {}), log: (line) => console.error(line) });
+      console.log(`logged in as ${config.email} (org ${config.orgName}); saved ${saveConfig(config)}`);
+      return 0;
+    }
+    case "logout": {
+      const config = loadConfig();
+      if (config?.refresh) await api(config.baseUrl, "POST", "/v1/auth/logout", { body: { refresh: config.refresh } }).catch(() => undefined);
+      deleteConfig();
+      console.log(`removed ${configPath()}`);
+      return 0;
+    }
+    case "whoami": {
+      const config = await requireConfig();
+      console.log(JSON.stringify(await api(config.baseUrl, "GET", "/v1/me", { token: config.token }), null, 2));
+      return 0;
+    }
+    case "org": {
+      const config = await requireConfig();
+      console.log(JSON.stringify(await orgCommand(rest, config), null, 2));
       return 0;
     }
     case "status": {
@@ -66,8 +141,7 @@ async function main(argv: string[]): Promise<number> {
     }
     case "items": {
       if (rest[0] !== "put" && rest[0] !== "retract") throw new Error("items supports: put, retract");
-      const config = loadConfig();
-      if (!config) throw new Error(`not logged in; run meshpoint login (${configPath()})`);
+      const config = await requireConfig();
       const repo = repoContext(process.cwd());
       if (!repo) throw new Error("not inside a git repo with an origin remote");
       if (rest[0] === "retract") {
@@ -82,7 +156,9 @@ async function main(argv: string[]): Promise<number> {
     }
     case "tap": {
       if (rest[0] !== "claude-code" && rest[0] !== "codex") throw new Error("tap supports: claude-code, codex");
-      const config = loadConfig();
+      const stored = loadConfig();
+      // A failed refresh keeps the stored token: the hook must never break the harness.
+      const config = stored ? await freshConfig(stored).catch(() => stored) : null;
       const raw = await readStdin();
       let payload: HookPayload = {};
       try {

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { projectIdFromRemote } from "@meshpoint/sdk";
@@ -7,6 +7,14 @@ import { projectIdFromRemote } from "@meshpoint/sdk";
 export interface Config {
   baseUrl: string;
   token: string;
+  // Present after `meshpoint login`; absent for tokens pasted with --token.
+  refresh?: string;
+  exp?: number;
+  org?: string;
+  orgName?: string;
+  user?: string;
+  email?: string;
+  agent?: string;
 }
 
 export type Environment = Readonly<Record<string, string | undefined>>;
@@ -26,7 +34,9 @@ export function loadConfig(env: Environment = process.env, home = homedir()): Co
   const baseUrl = env.MESHPOINT_BASE_URL ?? fromFile.baseUrl;
   const token = env.MESHPOINT_TOKEN ?? fromFile.token;
   if (!baseUrl || !token) return null;
-  return { baseUrl, token };
+  // An environment token stands alone: file-held refresh state belongs to the file's token.
+  if (env.MESHPOINT_TOKEN) return { baseUrl, token };
+  return { ...fromFile, baseUrl, token };
 }
 
 export function saveConfig(config: Config, env: Environment = process.env, home = homedir()): string {
@@ -34,6 +44,10 @@ export function saveConfig(config: Config, env: Environment = process.env, home 
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
   return file;
+}
+
+export function deleteConfig(env: Environment = process.env, home = homedir()): void {
+  rmSync(configPath(env, home), { force: true });
 }
 
 export function stateDir(env: Environment = process.env, home = homedir()): string {
