@@ -1,5 +1,5 @@
 import path from "node:path";
-import { MeshpointClient, type Presence, type RecallResponse } from "@meshpoint/sdk";
+import { MeshpointClient, MeshpointError, type Presence, type RecallResponse } from "@meshpoint/sdk";
 import type { Config, RepoContext } from "../config.js";
 import type { Checkpoints } from "../checkpoints.js";
 import { ID_PREFIX_CHARS } from "../items.js";
@@ -31,6 +31,8 @@ export interface TapDeps {
   fetch?: typeof fetch;
   // Longest the session-start inject waits for teammates after items have arrived.
   presenceWaitMs?: number;
+  // Called once after a 401 (org key rotated, token revoked); returns the renewed config or null.
+  refresh?: () => Promise<Config | null>;
 }
 
 const DEFAULT_PRESENCE_WAIT_MS = 1500;
@@ -46,10 +48,19 @@ export async function runClaudeCodeTap(payload: HookPayload, deps: TapDeps): Pro
   const empty = event === "Stop" ? '{"decision":"continue"}' : "{}";
   if (!repo) return empty;
 
+  let config = deps.config;
+  const is401 = (err: unknown) => err instanceof MeshpointError && err.status === 401;
+  const reauth = async (): Promise<boolean> => {
+    const next = deps.refresh ? await deps.refresh() : null;
+    if (!next) return false;
+    config = next;
+    return true;
+  };
+
   const client = (branch: string, onError?: (err: Error) => void) =>
     new MeshpointClient({
-      baseUrl: deps.config.baseUrl,
-      token: deps.config.token,
+      baseUrl: config.baseUrl,
+      token: config.token,
       project: repo.project,
       branch,
       ...(deps.fetch ? { fetch: deps.fetch } : {}),
@@ -71,32 +82,46 @@ export async function runClaudeCodeTap(payload: HookPayload, deps: TapDeps): Pro
     deps.spool.append(session, turn);
   };
 
+  // The SDK reports a failed flush through onError instead of throwing.
+  const send = async (turns: SpooledTurn[]): Promise<"ok" | "failed" | "unauthorized"> => {
+    const byBranch = new Map<string, SpooledTurn[]>();
+    for (const t of turns) byBranch.set(t.branch, [...(byBranch.get(t.branch) ?? []), t]);
+    let failed = false;
+    let unauthorized = false;
+    const note = (err: unknown) => {
+      failed = true;
+      if (is401(err)) unauthorized = true;
+    };
+    try {
+      for (const [branch, batch] of byBranch) {
+        const c = client(branch, note);
+        for (const t of batch) c.capture({ body: t.body, at: t.at, ...(t.paths ? { paths: t.paths } : {}) });
+        await c.close();
+      }
+    } catch (err) {
+      note(err);
+    }
+    return failed ? (unauthorized ? "unauthorized" : "failed") : "ok";
+  };
+
   const flush = async (force: boolean): Promise<void> => {
     if (!deps.spool.isDue(session, now(), force)) return;
     const taken = deps.spool.take(session);
-    const byBranch = new Map<string, SpooledTurn[]>();
-    for (const t of taken.turns) byBranch.set(t.branch, [...(byBranch.get(t.branch) ?? []), t]);
-    // The SDK reports a failed flush through onError instead of throwing.
-    let failed = false;
-    try {
-      for (const [branch, turns] of byBranch) {
-        const c = client(branch, () => {
-          failed = true;
-        });
-        for (const t of turns) c.capture({ body: t.body, at: t.at, ...(t.paths ? { paths: t.paths } : {}) });
-        await c.close();
-      }
-    } catch {
-      failed = true;
-    }
-    if (failed) taken.restore();
-    else taken.discard();
+    let result = await send(taken.turns);
+    if (result === "unauthorized" && (await reauth())) result = await send(taken.turns);
+    if (result === "ok") taken.discard();
+    else taken.restore();
   };
 
   try {
     switch (event) {
       case "SessionStart": {
-        const { recall, presence } = await client(repo.branch).sessionStart();
+        const { recall, presence } = await client(repo.branch)
+          .sessionStart()
+          .catch(async (err: unknown) => {
+            if (!is401(err) || !(await reauth())) throw err;
+            return client(repo.branch).sessionStart();
+          });
         const teammates = await Promise.race([
           presence,
           new Promise<Presence[]>((r) => setTimeout(() => r([]), deps.presenceWaitMs ?? DEFAULT_PRESENCE_WAIT_MS)),

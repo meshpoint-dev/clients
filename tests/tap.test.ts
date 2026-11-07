@@ -77,6 +77,37 @@ const payload = (hook_event_name: string, extra: Record<string, unknown> = {}) =
 });
 
 describe("claude code tap", () => {
+  it("refreshes once after a 401 and retries the inject and the flush", async () => {
+    const seen: Array<{ url: string; token: string | undefined }> = [];
+    const gated = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const token = (init?.headers as Record<string, string> | undefined)?.authorization?.replace("Bearer ", "");
+      seen.push({ url: String(input), token });
+      if (token !== "tok2") return Response.json({ error: "unauthorized" }, { status: 401 });
+      if (String(input).includes("/v1/recall")) return Response.json({ project: "p", branch: "master", checkpoint: null, items: [], generated_at: clock, source: "kv" });
+      if (String(input).includes("/v1/presence")) return Response.json({ presence: [{ agent: "a2", user: "sam", branch: "master", paths: [], updated_at: clock }] });
+      return Response.json({ accepted: 1 }, { status: 202 });
+    });
+    const refresh = vi.fn(async () => ({ baseUrl: "https://api.test", token: "tok2" }));
+    const d = deps({ fetch: gated as unknown as typeof fetch, refresh });
+    const start = await runClaudeCodeTap(payload("SessionStart"), d);
+    expect(start).toContain("sam");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(seen.filter((c) => c.url.includes("/v1/recall")).map((c) => c.token)).toEqual(["tok", "tok2"]);
+
+    // A fresh tap (new process) still holds the old token: the flush path refreshes too.
+    const d2 = deps({ fetch: gated as unknown as typeof fetch, refresh });
+    await runClaudeCodeTap(payload("UserPromptSubmit", { prompt: "hi" }), d2);
+    clock += FLUSH_AFTER_MS + 1;
+    await runClaudeCodeTap(payload("SessionEnd"), d2);
+    const captures = seen.filter((c) => c.url.includes("/v1/capture")).map((c) => c.token);
+    expect(captures).toEqual(["tok", "tok2"]);
+    expect(new Spool(dir).take("s1").turns).toHaveLength(0);
+
+    // No refresh available: the hook still degrades to the empty answer.
+    const d3 = deps({ fetch: gated as unknown as typeof fetch });
+    expect(await runClaudeCodeTap(payload("SessionStart"), d3)).toBe("{}");
+  });
+
   it("renders the session-start inject from recall and presence", async () => {
     const out = JSON.parse(await runClaudeCodeTap(payload("SessionStart", { source: "startup" }), deps()));
     const text: string = out.hookSpecificOutput.additionalContext;

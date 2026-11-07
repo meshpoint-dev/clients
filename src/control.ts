@@ -145,11 +145,12 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 }
 
-// Refreshes the agent token when it has under a day left. Returns the config to use; saves it when renewed.
-export async function freshConfig(config: Config, opts: { now?: number; fetch?: typeof fetch; env?: Environment; home?: string } = {}): Promise<Config> {
-  if (!config.refresh || !config.exp) return config;
+// Refreshes the agent token when it has under a day left, or always with `force` (after a 401: the
+// org key rotated or the token was cut short). Returns the config to use; saves it when renewed.
+export async function freshConfig(config: Config, opts: { now?: number; force?: boolean; fetch?: typeof fetch; env?: Environment; home?: string } = {}): Promise<Config> {
+  if (!config.refresh) return config;
   const now = opts.now ?? Date.now();
-  if (config.exp - now / 1000 > REFRESH_WHEN_LEFT_S) return config;
+  if (!opts.force && config.exp !== undefined && config.exp - now / 1000 > REFRESH_WHEN_LEFT_S) return config;
   const g = await api<Grant>(config.baseUrl, "POST", "/v1/auth/refresh", { body: { refresh: config.refresh }, fetch: opts.fetch });
   const next = configFromGrant(config.baseUrl, g);
   saveConfig(next, opts.env, opts.home);

@@ -7,7 +7,8 @@ import { connectCodex } from "./codex/connect.js";
 import { parseCodexTranscript } from "./codex/transcript.js";
 import { Checkpoints } from "./checkpoints.js";
 import { configPath, deleteConfig, loadConfig, repoContext, saveConfig, spoolDir, stateDir, type Config } from "./config.js";
-import { api, freshConfig, login } from "./control.js";
+import { MeshpointError } from "@meshpoint/sdk";
+import { api, ApiError, freshConfig, login } from "./control.js";
 import { parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
 import { Spool } from "./spool.js";
 
@@ -53,6 +54,18 @@ async function requireConfig(): Promise<Config> {
   const config = loadConfig();
   if (!config) throw new Error(`not logged in; run meshpoint login (${configPath()})`);
   return freshConfig(config);
+}
+
+// A 401 on a stored session token means the org key rotated or the token was revoked early:
+// refresh once and retry before giving up.
+async function withAuth<T>(config: Config, fn: (c: Config) => Promise<T>): Promise<T> {
+  try {
+    return await fn(config);
+  } catch (err) {
+    const status = err instanceof ApiError || err instanceof MeshpointError ? err.status : 0;
+    if (status !== 401 || !config.refresh) throw err;
+    return fn(await freshConfig(config, { force: true }));
+  }
 }
 
 async function orgCommand(args: string[], config: Config): Promise<unknown> {
@@ -116,12 +129,12 @@ async function main(argv: string[]): Promise<number> {
     }
     case "whoami": {
       const config = await requireConfig();
-      console.log(JSON.stringify(await api(config.baseUrl, "GET", "/v1/me", { token: config.token }), null, 2));
+      console.log(JSON.stringify(await withAuth(config, (c) => api(c.baseUrl, "GET", "/v1/me", { token: c.token })), null, 2));
       return 0;
     }
     case "org": {
       const config = await requireConfig();
-      console.log(JSON.stringify(await orgCommand(rest, config), null, 2));
+      console.log(JSON.stringify(await withAuth(config, (c) => orgCommand(rest, c)), null, 2));
       return 0;
     }
     case "status": {
@@ -145,12 +158,12 @@ async function main(argv: string[]): Promise<number> {
       const repo = repoContext(process.cwd());
       if (!repo) throw new Error("not inside a git repo with an origin remote");
       if (rest[0] === "retract") {
-        console.log(JSON.stringify(await retractItems(rest.slice(1), { config, repo })));
+        console.log(JSON.stringify(await withAuth(config, (c) => retractItems(rest.slice(1), { config: c, repo }))));
         return 0;
       }
       const file = flag(rest, "--file");
       const drafts = rest.includes("--item") ? parseItemArgs(rest.slice(1)) : parseItems(file ? readFileSync(file, "utf8") : await readStdin());
-      const out = await putItems(drafts, { config, repo, checkpoints: new Checkpoints(stateDir()) });
+      const out = await withAuth(config, (c) => putItems(drafts, { config: c, repo, checkpoints: new Checkpoints(stateDir()) }));
       console.log(JSON.stringify({ ...out, project: repo.project, branch: repo.branch }));
       return 0;
     }
@@ -172,6 +185,7 @@ async function main(argv: string[]): Promise<number> {
       }
       const out = await runClaudeCodeTap(payload, {
         config,
+        refresh: () => freshConfig(config, { force: true }).catch(() => null),
         repo: repoContext,
         readTranscript: (file) => readFileSync(file, "utf8"),
         spool: new Spool(spoolDir()),
