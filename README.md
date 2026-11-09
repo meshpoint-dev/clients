@@ -1,6 +1,6 @@
 # meshpoint clients
 
-The `meshpoint` CLI and harness adapters for Meshpoint 1.0. Adapters: Claude Code, Codex, Cursor, Antigravity, pi, OpenClaw (opencode in progress). Claude Code, Codex and pi are verified live against staging; Cursor and Antigravity are ported from their published hook docs and need a live check; OpenClaw is validated offline against the installed CLI.
+The `meshpoint` CLI and harness adapters for Meshpoint 1.0. Adapters: Claude Code, Codex, Cursor, Antigravity, pi, opencode, OpenClaw. Claude Code, Codex, pi and opencode are verified live against staging; Cursor and Antigravity are ported from their published hook docs and need a live check; OpenClaw is validated offline against the installed CLI.
 
 ```
 meshpoint login                      # browser login through WorkOS AuthKit; 7-day agent token + refresh session
@@ -16,6 +16,7 @@ meshpoint connect cursor --project /abs/path/to/repo        # <repo>/.cursor/hoo
 meshpoint connect antigravity --project /abs/path/to/repo   # <repo>/.agents/hooks.json + skill
 meshpoint connect pi --pi-dir /abs/pi/agent/dir             # extension stub + skill (default ~/.pi/agent)
 meshpoint connect openclaw                                  # hook pack via `openclaw plugins install`
+meshpoint connect opencode --config-dir /abs/config/dir     # plugin link + skill (default ~/.config/opencode)
 meshpoint status                     # config + project id for the current repo
 meshpoint items put --item gotcha 'title' 'body'   # write items for the current repo and branch
 meshpoint items put < items.json     # same, as a JSON array of {kind, title, body}
@@ -47,7 +48,7 @@ Codex speaks the same hook protocol (event names, payload fields, `hookSpecificO
 
 ## One core, many harnesses
 
-`src/tap.ts` holds one harness session's side of the mesh (`Tap`): recall and presence rendered for injection at start, turns spooled and sent in 60s batches, the checkpoint nudge, one refresh-and-retry after a 401. Hook-style harnesses (Claude Code, Codex, Cursor, Antigravity, OpenClaw) run `meshpoint tap <harness>` once per event with the payload on stdin; in-process harnesses (pi) call `openTap()` from `src/runtime.ts` and drive the same object directly. Adding a harness means translating its events onto `start / user / assistant / nudge / end`.
+`src/tap.ts` holds one harness session's side of the mesh (`Tap`): recall and presence rendered for injection at start, turns spooled and sent in 60s batches, the checkpoint nudge, one refresh-and-retry after a 401. Hook-style harnesses (Claude Code, Codex, Cursor, Antigravity, OpenClaw) run `meshpoint tap <harness>` once per event with the payload on stdin; in-process harnesses (pi, opencode) call `openTap()` from `src/runtime.ts` and drive the same object directly. Adding a harness means translating its events onto `start / user / assistant / nudge / end`.
 
 ## Cursor
 
@@ -60,6 +61,10 @@ Codex speaks the same hook protocol (event names, payload fields, `hookSpecificO
 ## pi
 
 `connect pi` writes `<dir>/extensions/meshpoint.js`, a one-line stub importing the built extension by absolute path (pi's loader resolves relative imports from a symlink's own directory, so a symlink does not work), and `<dir>/skills/meshpoint/SKILL.md`. `<dir>` defaults to `$PI_CODING_AGENT_DIR`, then `~/.pi/agent`; pi loads every `.js` in its extensions directory, no settings change needed (`/reload` or restart). Re-run `connect pi` after moving the CLI. Events: `session_start` opens the tap; `before_agent_start` spools the prompt and, once per session, returns a hidden custom message with recall and presence; `turn_end` collects the reply and `tool_call` the `edit`/`write` paths; `agent_before_settle` spools the reply and, when a checkpoint is due, appends the nudge as a custom message with `continue: true` so pi runs one more turn; `session_before_compact` and `session_shutdown` send the spool; `session_compact` re-injects for the next prompt. Verified live: `pi -p` in the testbed against staging captured and showed presence. On this machine `~/.pi/agent/extensions` is a symlink into a dotfiles repo; use `--pi-dir` for tests.
+
+## opencode
+
+`connect opencode` links `<dir>/plugins/meshpoint.js` to the CLI's `dist/opencode/plugin.js` (bun follows the link's real path, so `../runtime.js` and the SDK resolve from the CLI install; re-run after moving it) and writes `<dir>/skills/meshpoint/SKILL.md`; `<dir>` defaults to `~/.config/opencode` honouring `XDG_CONFIG_HOME`. Restart opencode. The plugin file has exactly one export because opencode calls every export as a plugin. Per session it fetches recall and presence once and appends them to the system prompt of every model request (`experimental.chat.system.transform`, waiting up to 4s for the fetch on the first request); `chat.message` spools the prompt, `experimental.text.complete` the reply, `tool.execute.after` the `edit`/`write` paths; `session.idle` flushes a due spool and, when a checkpoint is due, sends a follow-up prompt through `client.session.promptAsync` asking for the `meshpoint` skill. Subagent sessions are ignored. `opencode run` exits about 20ms after `session.idle` without awaiting event handlers, so the last turn of a one-shot run stays spooled until that session continues (`opencode run -c`). Verified live: a headless run in the testbed, continued 60s later, flushed three turns to staging and showed presence.
 
 ## OpenClaw
 

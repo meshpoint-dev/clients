@@ -10,6 +10,7 @@ import { parseCodexTranscript } from "./codex/transcript.js";
 import { connectCursor } from "./cursor/connect.js";
 import { runCursorTap, type CursorHookPayload } from "./cursor/tap.js";
 import { connectOpenclaw } from "./openclaw/connect.js";
+import { connectOpencode } from "./opencode/connect.js";
 import { ReplyLog, runOpenclawTap, type OpenclawEvent } from "./openclaw/tap.js";
 import { connectPi } from "./pi/connect.js";
 import { Checkpoints } from "./checkpoints.js";
@@ -50,6 +51,9 @@ const USAGE = `meshpoint <command>
   connect pi [--pi-dir <dir>] [--remove]   pi extension <dir>/extensions/meshpoint.js and <dir>/skills/meshpoint
                                            (default dir: $PI_CODING_AGENT_DIR or ~/.pi/agent)
   connect openclaw [--remove]              hook pack installed through 'openclaw plugins install'
+  connect opencode [--config-dir <dir>] [--remove]
+                                           plugin link <dir>/plugins/meshpoint.js and <dir>/skills/meshpoint
+                                           (default dir: ~/.config/opencode)
   items put --item <kind> <title> <body> [--item ...]
   items put --file <path> | items put < items.json
                                            write items for the current repo and branch; the file or
@@ -166,6 +170,8 @@ async function main(argv: string[]): Promise<number> {
       if (project !== undefined && !path.isAbsolute(project)) throw new Error("--project must be an absolute path");
       const piDir = flag(rest, "--pi-dir");
       if (piDir !== undefined && !path.isAbsolute(piDir)) throw new Error("--pi-dir must be an absolute path");
+      const configDir = flag(rest, "--config-dir");
+      if (configDir !== undefined && !path.isAbsolute(configDir)) throw new Error("--config-dir must be an absolute path");
       const remove = rest.includes("--remove");
       const inProject = project ? { projectDir: project } : {};
       if (rest[0] === "claude-code") console.log(connectClaudeCode({ remove, ...(project ? { configDir: path.join(project, ".claude") } : {}) }));
@@ -174,7 +180,8 @@ async function main(argv: string[]): Promise<number> {
       else if (rest[0] === "antigravity") console.log(connectAntigravity({ remove, ...inProject }));
       else if (rest[0] === "pi") console.log(connectPi({ remove, ...(piDir ? { piDir } : {}) }));
       else if (rest[0] === "openclaw") console.log(connectOpenclaw({ remove }));
-      else throw new Error("connect supports: claude-code, codex, cursor, antigravity, pi, openclaw");
+      else if (rest[0] === "opencode") console.log(connectOpencode({ remove, ...(configDir ? { configDir } : {}) }));
+      else throw new Error("connect supports: claude-code, codex, cursor, antigravity, pi, opencode, openclaw");
       return 0;
     }
     case "items": {
