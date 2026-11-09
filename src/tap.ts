@@ -23,6 +23,8 @@ export interface TapCoreDeps {
 }
 
 const DEFAULT_PRESENCE_WAIT_MS = 1500;
+// Harnesses that feed the nudge back as a user prompt (Cursor) match on this to keep it out of the capture.
+export const NUDGE_PREFIX = "Meshpoint checkpoint due";
 
 type SendResult = "ok" | "failed" | "unauthorized";
 
@@ -78,7 +80,7 @@ export class Tap {
     const due = this.deps.checkpoints.due(this.deps.session, this.repo.project, this.repo.branch, entries);
     if (!due) return null;
     this.deps.checkpoints.markNudge(this.deps.session, this.now());
-    return `Meshpoint checkpoint due (${due.turns} replies since the last one). Run the ${SKILL_NAME} skill now, then continue.`;
+    return `${NUDGE_PREFIX} (${due.turns} replies since the last one). Run the ${SKILL_NAME} skill now, then continue.`;
   }
 
   // Session end and pre-compaction: send whatever is spooled now.
