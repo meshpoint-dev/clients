@@ -1,10 +1,17 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { connectAntigravity } from "./antigravity/connect.js";
+import { runAntigravityTap, type AntigravityHookPayload } from "./antigravity/tap.js";
 import { connectClaudeCode } from "./claude-code/connect.js";
 import { runClaudeCodeTap, type HookPayload } from "./claude-code/tap.js";
 import { connectCodex } from "./codex/connect.js";
 import { parseCodexTranscript } from "./codex/transcript.js";
+import { connectCursor } from "./cursor/connect.js";
+import { runCursorTap, type CursorHookPayload } from "./cursor/tap.js";
+import { connectOpenclaw } from "./openclaw/connect.js";
+import { ReplyLog, runOpenclawTap, type OpenclawEvent } from "./openclaw/tap.js";
+import { connectPi } from "./pi/connect.js";
 import { Checkpoints } from "./checkpoints.js";
 import { configPath, deleteConfig, loadConfig, repoContext, saveConfig, spoolDir, stateDir, type Config } from "./config.js";
 import { MeshpointError } from "@meshpoint/sdk";
@@ -35,13 +42,24 @@ const USAGE = `meshpoint <command>
   connect codex [--project <dir>] [--remove]
                                            same for Codex: <dir>/.codex/{hooks.json,rules/meshpoint.rules}
                                            and <dir>/.agents/skills/meshpoint (global: ~/.codex, ~/.agents)
+  connect cursor [--project <dir>] [--remove]
+                                           same for Cursor: <dir>/.cursor/{hooks.json,skills/meshpoint} (global: ~/.cursor)
+  connect antigravity [--project <dir>] [--remove]
+                                           same for Antigravity: <dir>/.agents/{hooks.json,skills/meshpoint}
+                                           (global: ~/.gemini/config)
+  connect pi [--pi-dir <dir>] [--remove]   pi extension <dir>/extensions/meshpoint.js and <dir>/skills/meshpoint
+                                           (default dir: $PI_CODING_AGENT_DIR or ~/.pi/agent)
+  connect openclaw [--remove]              hook pack installed through 'openclaw plugins install'
   items put --item <kind> <title> <body> [--item ...]
   items put --file <path> | items put < items.json
                                            write items for the current repo and branch; the file or
                                            stdin form takes a JSON array of {kind, title, body}
   items retract <id>...                    retract items on the current branch; an id may be a prefix
-  tap claude-code | tap codex              hook entry point; reads one hook payload on stdin
+  tap claude-code | codex | cursor | antigravity [<event>] | openclaw
+                                           hook entry point; reads one hook payload on stdin
 `;
+
+const TAP_HARNESSES = new Set(["claude-code", "codex", "cursor", "antigravity", "openclaw"]);
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -146,10 +164,17 @@ async function main(argv: string[]): Promise<number> {
     case "connect": {
       const project = flag(rest, "--project");
       if (project !== undefined && !path.isAbsolute(project)) throw new Error("--project must be an absolute path");
+      const piDir = flag(rest, "--pi-dir");
+      if (piDir !== undefined && !path.isAbsolute(piDir)) throw new Error("--pi-dir must be an absolute path");
       const remove = rest.includes("--remove");
+      const inProject = project ? { projectDir: project } : {};
       if (rest[0] === "claude-code") console.log(connectClaudeCode({ remove, ...(project ? { configDir: path.join(project, ".claude") } : {}) }));
-      else if (rest[0] === "codex") console.log(connectCodex({ remove, ...(project ? { projectDir: project } : {}) }));
-      else throw new Error("connect supports: claude-code, codex");
+      else if (rest[0] === "codex") console.log(connectCodex({ remove, ...inProject }));
+      else if (rest[0] === "cursor") console.log(connectCursor({ remove, ...inProject }));
+      else if (rest[0] === "antigravity") console.log(connectAntigravity({ remove, ...inProject }));
+      else if (rest[0] === "pi") console.log(connectPi({ remove, ...(piDir ? { piDir } : {}) }));
+      else if (rest[0] === "openclaw") console.log(connectOpenclaw({ remove }));
+      else throw new Error("connect supports: claude-code, codex, cursor, antigravity, pi, openclaw");
       return 0;
     }
     case "items": {
@@ -168,31 +193,56 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "tap": {
-      if (rest[0] !== "claude-code" && rest[0] !== "codex") throw new Error("tap supports: claude-code, codex");
+      const harness = rest[0];
+      if (!TAP_HARNESSES.has(harness ?? "")) throw new Error(`tap supports: ${[...TAP_HARNESSES].join(", ")}`);
       const stored = loadConfig();
       // A failed refresh keeps the stored token: the hook must never break the harness.
       const config = stored ? await freshConfig(stored).catch(() => stored) : null;
       const raw = await readStdin();
-      let payload: HookPayload = {};
-      try {
-        payload = JSON.parse(raw) as HookPayload;
-      } catch {
-        payload = {};
+      const parse = <T>(): T => {
+        try {
+          return JSON.parse(raw) as T;
+        } catch {
+          return {} as T;
+        }
+      };
+      const hookDeps = (c: Config) => ({
+        config: c,
+        refresh: () => freshConfig(c, { force: true }).catch(() => null),
+        repo: repoContext,
+        readTranscript: (file: string) => readFileSync(file, "utf8"),
+        spool: new Spool(spoolDir()),
+        checkpoints: new Checkpoints(stateDir()),
+      });
+      // Each harness has its own "do nothing" answer, needed even without a login.
+      if (harness === "cursor") {
+        const payload = parse<CursorHookPayload>();
+        if (!config) process.stdout.write(payload.hook_event_name === "beforeSubmitPrompt" ? '{"continue":true}' : "{}");
+        else process.stdout.write(await runCursorTap(payload, hookDeps(config)));
+        return 0;
       }
+      if (harness === "antigravity") {
+        // Antigravity payloads carry no event name; the installed command passes it as an argument.
+        let payload = parse<AntigravityHookPayload>();
+        if (rest[1]) payload = { ...payload, hookEventName: rest[1] };
+        if (!config) process.stdout.write(payload.hookEventName === "Stop" ? '{"decision":"stop"}' : "{}");
+        else process.stdout.write(await runAntigravityTap(payload, { ...hookDeps(config), stateDir: stateDir() }));
+        return 0;
+      }
+      if (harness === "openclaw") {
+        if (!config) process.stdout.write("{}");
+        else {
+          const { readTranscript: _unused, ...deps } = hookDeps(config);
+          process.stdout.write(await runOpenclawTap(parse<OpenclawEvent>(), { ...deps, env: process.env, replies: new ReplyLog(stateDir()) }));
+        }
+        return 0;
+      }
+      const payload = parse<HookPayload>();
       if (!config) {
         process.stdout.write(payload.hook_event_name === "Stop" ? '{"decision":"continue"}' : "{}");
         return 0;
       }
-      const out = await runClaudeCodeTap(payload, {
-        config,
-        refresh: () => freshConfig(config, { force: true }).catch(() => null),
-        repo: repoContext,
-        readTranscript: (file) => readFileSync(file, "utf8"),
-        spool: new Spool(spoolDir()),
-        checkpoints: new Checkpoints(stateDir()),
-        ...(rest[0] === "codex" ? { parseTranscript: parseCodexTranscript } : {}),
-      });
-      process.stdout.write(out);
+      process.stdout.write(await runClaudeCodeTap(payload, { ...hookDeps(config), ...(harness === "codex" ? { parseTranscript: parseCodexTranscript } : {}) }));
       return 0;
     }
     default:
