@@ -16,19 +16,25 @@ import { connectPi } from "./pi/connect.js";
 import { Checkpoints } from "./checkpoints.js";
 import { configPath, deleteConfig, loadConfig, repoContext, saveConfig, spoolDir, stateDir, type Config } from "./config.js";
 import { MeshpointError } from "@meshpoint/sdk";
-import { api, ApiError, freshConfig, login } from "./control.js";
+import { api, ApiError, canOpenBrowser, deviceLogin, freshConfig, login } from "./control.js";
+import { detectHarnesses, renderDetected } from "./detect.js";
+import { renderDoctor, runDoctor } from "./doctor.js";
 import { parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
 import { Spool } from "./spool.js";
 
 const USAGE = `meshpoint <command>
 
-  login [--base-url <url>] [--agent <name>] [--org <id>]
-                                           log in through the browser; stores tokens in ${configPath()}
-                                           (default base url: https://api.meshpoint.dev)
+  login [--base-url <url>] [--agent <name>] [--org <id>] [--device | --browser]
+                                           log in; stores tokens in ${configPath()}
+                                           (default base url: https://api.meshpoint.dev). Opens a browser
+                                           when one can run, else prints a code to approve in the console;
+                                           --device or --browser forces one flow
   login --base-url <url> --token <token>   store a pasted agent token instead
   logout                                   end the session and delete the stored tokens
   whoami                                   account, org and role for the stored token
   status                                   show config and the project for the current directory
+  doctor [--json]                          check login, repo, connected harnesses, last capture, spool;
+                                           exits 1 when something is wrong
   org                                      org, members and key ids
   org invite <email> [--owner]             invite by email (owner only); accepted at their next login
   org invites                              pending invites (owner only)
@@ -37,23 +43,23 @@ const USAGE = `meshpoint <command>
   org revoke <session-id>                  revoke a session
   org rotate-key [--revoke-sessions]       rotate the org signing key (owner only)
   org projects                             projects recorded for the org
-  connect claude-code [--project <dir>] [--remove]
-                                           install or remove the Claude Code hooks and checkpoint skill;
-                                           --project writes <dir>/.claude/ instead of the global ~/.claude/
-  connect codex [--project <dir>] [--remove]
-                                           same for Codex: <dir>/.codex/{hooks.json,rules/meshpoint.rules}
-                                           and <dir>/.agents/skills/meshpoint (global: ~/.codex, ~/.agents)
-  connect cursor [--project <dir>] [--remove]
-                                           same for Cursor: <dir>/.cursor/{hooks.json,skills/meshpoint} (global: ~/.cursor)
-  connect antigravity [--project <dir>] [--remove]
-                                           same for Antigravity: <dir>/.agents/{hooks.json,skills/meshpoint}
-                                           (global: ~/.gemini/config)
-  connect pi [--pi-dir <dir>] [--remove]   pi extension <dir>/extensions/meshpoint.js and <dir>/skills/meshpoint
+  connect [--json]                         list the harnesses on this machine and whether each is connected
+  connect <harness> [--project <dir>] [--remove]
+                                           install (or remove) the hooks and checkpoint skill for one harness
+                                           in your user config, so every repo is covered; --project <dir>
+                                           writes into that repo instead. Harnesses and their files:
+    claude-code                            ~/.claude/settings.json + ~/.claude/skills/meshpoint
+                                           (--project: <dir>/.claude/)
+    codex                                  ~/.codex/{hooks.json,rules/meshpoint.rules} + ~/.agents/skills/meshpoint
+                                           (--project: <dir>/.codex, <dir>/.agents)
+    cursor                                 ~/.cursor/{hooks.json,skills/meshpoint} (--project: <dir>/.cursor)
+    antigravity                            ~/.gemini/config/{hooks.json,skills/meshpoint}
+                                           (--project: <dir>/.agents)
+    pi [--pi-dir <dir>]                    <dir>/extensions/meshpoint.js + <dir>/skills/meshpoint
                                            (default dir: $PI_CODING_AGENT_DIR or ~/.pi/agent)
-  connect openclaw [--remove]              hook pack installed through 'openclaw plugins install'
-  connect opencode [--config-dir <dir>] [--remove]
-                                           plugin link <dir>/plugins/meshpoint.js and <dir>/skills/meshpoint
+    opencode [--config-dir <dir>]          <dir>/plugins/meshpoint.js + <dir>/skills/meshpoint
                                            (default dir: ~/.config/opencode)
+    openclaw                               hook pack installed through 'openclaw plugins install'
   items put --item <kind> <title> <body> [--item ...]
   items put --file <path> | items put < items.json
                                            write items for the current repo and branch; the file or
@@ -138,7 +144,10 @@ async function main(argv: string[]): Promise<number> {
       }
       const agent = flag(rest, "--agent");
       const org = flag(rest, "--org");
-      const config = await login({ baseUrl, ...(agent ? { agent } : {}), ...(org ? { org } : {}), log: (line) => console.error(line) });
+      const useDevice = rest.includes("--device") || (!rest.includes("--browser") && !canOpenBrowser());
+      const config = useDevice
+        ? await deviceLogin({ baseUrl, ...(agent ? { agent } : {}), log: (line) => console.log(line) })
+        : await login({ baseUrl, ...(agent ? { agent } : {}), ...(org ? { org } : {}), log: (line) => console.error(line) });
       console.log(`logged in as ${config.email} (org ${config.orgName}); saved ${saveConfig(config)}`);
       return 0;
     }
@@ -165,7 +174,17 @@ async function main(argv: string[]): Promise<number> {
       console.log(JSON.stringify({ config: config ? { baseUrl: config.baseUrl, token: "set" } : null, repo }, null, 2));
       return 0;
     }
+    case "doctor": {
+      const report = await runDoctor();
+      console.log(rest.includes("--json") ? JSON.stringify(report, null, 2) : renderDoctor(report));
+      return report.ok ? 0 : 1;
+    }
     case "connect": {
+      if (rest[0] === undefined || rest[0] === "--json") {
+        const rows = detectHarnesses();
+        console.log(rest.includes("--json") ? JSON.stringify(rows, null, 2) : renderDetected(rows));
+        return 0;
+      }
       const project = flag(rest, "--project");
       if (project !== undefined && !path.isAbsolute(project)) throw new Error("--project must be an absolute path");
       const piDir = flag(rest, "--pi-dir");

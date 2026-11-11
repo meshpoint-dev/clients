@@ -2,31 +2,55 @@
 
 The `meshpoint` CLI and harness adapters for Meshpoint 1.0. Adapters: Claude Code, Codex, Cursor, Antigravity, pi, opencode, OpenClaw. Claude Code, Codex, pi, opencode and OpenClaw are verified live against staging; Cursor and Antigravity are ported from their published hook docs and need a live check.
 
+## Install
+
 ```
-meshpoint login                      # browser login through WorkOS AuthKit; 7-day agent token + refresh session
+npm i -g @meshpoint/cli@next         # 1.0.0-rc prereleases, until 1.0
+npm i -g @meshpoint/cli              # at 1.0
+```
+
+```
+meshpoint login                      # browser login when one can open; otherwise a device code to approve in the console
+meshpoint login --device             # force the device code (cloud agents, SSH); --browser forces the browser
 meshpoint login --base-url https://meshpoint-platform-staging.cmptr.workers.dev   # staging
 meshpoint login --base-url <url> --token <agent token>   # pasted dev token instead
 meshpoint whoami                     # account, org, role
+meshpoint doctor                     # login, repo, connected harnesses, last capture, spool; exit 1 when something is wrong
 meshpoint org | org invite <email> [--owner] | org invites | org remove <user> | org sessions | org revoke <id> | org rotate-key | org projects
 meshpoint logout
-meshpoint connect claude-code --project /abs/path/to/repo   # hooks + skill in <repo>/.claude/ only
-meshpoint connect claude-code        # global ~/.claude/ (not until the adapter is signed off)
-meshpoint connect codex --project /abs/path/to/repo         # hooks, rules and skill under <repo>/.codex and .agents
-meshpoint connect cursor --project /abs/path/to/repo        # <repo>/.cursor/hooks.json + skill
-meshpoint connect antigravity --project /abs/path/to/repo   # <repo>/.agents/hooks.json + skill
-meshpoint connect pi --pi-dir /abs/pi/agent/dir             # extension stub + skill (default ~/.pi/agent)
-meshpoint connect openclaw                                  # hook pack via `openclaw plugins install`
-meshpoint connect opencode --config-dir /abs/config/dir     # plugin link + skill (default ~/.config/opencode)
+meshpoint connect                    # which harnesses this machine has and whether each is connected (--json for agents)
+meshpoint connect claude-code        # hooks + skill in ~/.claude/, covers every repo
+meshpoint connect codex              # ~/.codex/{hooks.json,rules/meshpoint.rules} + ~/.agents/skills/meshpoint
+meshpoint connect cursor             # ~/.cursor/hooks.json + skill
+meshpoint connect antigravity        # ~/.gemini/config/hooks.json + skill
+meshpoint connect pi [--pi-dir /abs/dir]           # extension stub + skill (default ~/.pi/agent)
+meshpoint connect openclaw                         # hook pack via `openclaw plugins install`
+meshpoint connect opencode [--config-dir /abs/dir] # plugin link + skill (default ~/.config/opencode)
+meshpoint connect <harness> --project /abs/path/to/repo   # per-repo files instead (<repo>/.claude, .codex, .cursor, .agents)
+meshpoint connect <harness> --remove [--project <dir>]
 meshpoint status                     # config + project id for the current repo
 meshpoint items put --item gotcha 'title' 'body'   # write items for the current repo and branch
 meshpoint items put < items.json     # same, as a JSON array of {kind, title, body}
 meshpoint items retract 3f9c1a2b     # retract by id or unique id prefix
-meshpoint connect claude-code --remove
 ```
+
+`connect <harness>` without `--project` writes to your user config, so every repo you open is on the mesh. `--project <dir>` writes into one repo instead; the files then travel with the repo in git. The meshpoint testbed on the maintainers' machines uses `--project` only.
 
 ## Login
 
 `meshpoint login` listens on a random `127.0.0.1` port, opens `<base>/v1/auth/start?port&nonce&agent` in the browser, and the platform sends the browser back to that port with a one-time grant code after WorkOS AuthKit. The CLI exchanges the code for a 7-day agent token plus a 90-day refresh secret, stored in `~/.config/meshpoint/config.json` (mode 600). Every command refreshes the token when it has under a day left; the hook keeps the stored token if a refresh fails. The agent name defaults to `cli-<hostname>`.
+
+Without a browser (no `DISPLAY` or `WAYLAND_DISPLAY` on Linux, or an SSH or CI shell) the CLI uses the device code instead: `POST /v1/auth/device` returns a code and the CLI prints
+
+```
+Open https://app.meshpoint.dev/device?code=ABCD-EFGH
+or go to https://app.meshpoint.dev/device and enter ABCD-EFGH
+Waiting for approval (expires in 15 min)…
+```
+
+then polls `POST /v1/auth/device/token` every few seconds (backing off on 429 and network errors) until the user approves the code in the console, which returns the same grant as the browser flow. `--device` and `--browser` force one flow. Denial and expiry end the command with exit 1.
+
+`meshpoint doctor` checks the login file, that the token is accepted (`GET /v1/me`), that the current directory is a repo with an origin remote, that every harness found on the machine is connected (user scope or this repo), the project's last capture, and that the spool directory is writable. `·` lines are informational (no capture yet); only `✗` lines fail the command. `--json` returns `{ok, checks:[{id, status, detail}]}`.
 
 ## How the Claude Code adapter works
 
@@ -82,8 +106,13 @@ The project id is derived from `git remote get-url origin` (`host--owner--repo`)
 
 ## Develop
 
+The package depends on the published `@meshpoint/sdk`. To work against the sibling checkout instead, link it without touching `package.json`:
+
 ```
-npm install          # links ../meshpoint-sdk
+npm install
+npm install ../meshpoint-sdk --no-save   # use the local SDK build (run `npm run build` there first)
 npm run check
 npm run build && node dist/bin.js --help
 ```
+
+Publishing (maintainers, after `npm login`): `npm publish` in `../meshpoint-sdk`, then here. `prepublishOnly` runs the checks and the build; `publishConfig` tags prereleases `next`.

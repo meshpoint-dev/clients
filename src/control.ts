@@ -141,6 +141,70 @@ export async function login(opts: LoginOptions): Promise<Config> {
   }
 }
 
+// Device-code login for hosts without a browser (cloud agents, SSH sessions). The platform mints a
+// short code the user approves in the console; the CLI polls until the grant is ready.
+export interface DeviceStart {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete: string;
+  expires_in: number;
+  interval: number;
+}
+
+export interface DeviceLoginOptions {
+  baseUrl: string;
+  agent?: string;
+  fetch?: typeof fetch;
+  log?: (line: string) => void;
+  sleep?: (ms: number) => Promise<void>;
+  host?: string;
+}
+
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+export async function deviceLogin(opts: DeviceLoginOptions): Promise<Config> {
+  const agent = opts.agent ?? defaultAgentName();
+  if (!ID_RE.test(agent)) throw new Error("agent name must match " + ID_RE.source);
+  const log = opts.log ?? (() => undefined);
+  const sleep = opts.sleep ?? wait;
+  const start = await api<DeviceStart>(opts.baseUrl, "POST", "/v1/auth/device", { body: { agent, hostname: opts.host ?? hostname() }, fetch: opts.fetch });
+  log(`Open ${start.verification_uri_complete}`);
+  log(`or go to ${start.verification_uri} and enter ${start.user_code}`);
+  log(`Waiting for approval (expires in ${Math.max(1, Math.round(start.expires_in / 60))} min)…`);
+  let interval = Math.max(1, start.interval) * 1000;
+  let waited = 0;
+  while (waited < start.expires_in * 1000) {
+    await sleep(interval);
+    waited += interval;
+    try {
+      const g = await api<Grant>(opts.baseUrl, "POST", "/v1/auth/device/token", { body: { device_code: start.device_code }, fetch: opts.fetch });
+      return configFromGrant(opts.baseUrl, g);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 428) continue;
+        if (err.status === 429) {
+          interval += 5000;
+          continue;
+        }
+        if (err.status === 403) throw new Error("login denied in the console");
+        if (err.status === 410) throw new Error("code expired, run meshpoint login again");
+        throw err;
+      }
+      // Network trouble: slow down and keep polling until the code expires.
+      interval += 5000;
+    }
+  }
+  throw new Error("code expired, run meshpoint login again");
+}
+
+// A browser can plausibly open: a graphical session, macOS or Windows, and not an SSH or CI shell.
+export function canOpenBrowser(env: Environment = process.env, platform: NodeJS.Platform = process.platform): boolean {
+  if (env.CI) return false;
+  if (env.SSH_CONNECTION || env.SSH_TTY) return false;
+  return Boolean(env.DISPLAY || env.WAYLAND_DISPLAY || platform === "darwin" || platform === "win32");
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 }
