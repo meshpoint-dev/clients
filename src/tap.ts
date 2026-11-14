@@ -1,5 +1,5 @@
 import path from "node:path";
-import { MeshpointClient, MeshpointError, type Presence, type RecallResponse } from "@meshpoint/sdk";
+import { MeshpointClient, MeshpointError, redact, type Presence, type RecallResponse } from "@meshpoint/sdk";
 import type { Checkpoints } from "./checkpoints.js";
 import { SKILL_NAME } from "./claude-code/skill.js";
 import type { TranscriptEntry } from "./claude-code/transcript.js";
@@ -123,9 +123,11 @@ export class Tap {
     return true;
   }
 
+  // Credentials are masked before the turn touches the spool file, so nothing on disk or on the
+  // wire holds them. The SDK masks again on send for callers that bypass the spool.
   private spoolTurn(body: string, paths: string[] = []): void {
     const rel = paths.map((p) => (path.isAbsolute(p) ? path.relative(this.repo.root, p) : p)).filter((p) => p && !p.startsWith(".."));
-    const turn: SpooledTurn = { branch: this.repo.branch, body, at: this.now(), ...(rel.length ? { paths: rel } : {}) };
+    const turn: SpooledTurn = { branch: this.repo.branch, body: redact(body), at: this.now(), ...(rel.length ? { paths: rel } : {}) };
     this.deps.spool.append(this.deps.session, turn);
   }
 

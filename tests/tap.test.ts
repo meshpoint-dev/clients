@@ -133,6 +133,14 @@ describe("claude code tap", () => {
     expect(d.spool.read("s1")).toHaveLength(0);
   });
 
+  it("masks credentials before the turn reaches the spool file", async () => {
+    const d = deps();
+    await runClaudeCodeTap(payload("UserPromptSubmit", { prompt: "use ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij12 and DATABASE_URL=postgres://app:s3cretpass@db/x" }), d);
+    const spooled = d.spool.read("s1");
+    expect(spooled[0]?.body).toBe("[user] use [REDACTED:github-token] and DATABASE_URL=postgres://app:[REDACTED:url-password]@db/x");
+    expect(JSON.stringify(spooled)).not.toMatch(/ghp_|s3cretpass/);
+  });
+
   it("flushes at once on session end and pre-compact, without a checkpoint body", async () => {
     const d = deps();
     await runClaudeCodeTap(payload("UserPromptSubmit", { prompt: "hi" }), d);

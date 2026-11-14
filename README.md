@@ -64,7 +64,7 @@ Every hook runs `meshpoint tap claude-code` with the event payload on stdin.
 | PreCompact | spool sent now. |
 | SessionEnd | spool sent now. |
 
-Turns are spooled to `~/.local/state/meshpoint/spool/<session>.jsonl` and sent once the oldest spooled turn is 60s old, so a session costs about one request per minute. A failed send keeps the spool for the next hook. Any failure degrades to an empty hook answer; the mesh never breaks the harness.
+Credentials in a prompt or reply (API keys with known prefixes, private key blocks, passwords in URLs, bearer headers, values assigned to names like `token` or `password`) are replaced with `[REDACTED:<kind>]` before the turn is written to the spool, so neither the disk nor the platform holds them; the SDK applies the same masking to items. Turns are spooled to `~/.local/state/meshpoint/spool/<session>.jsonl` and sent once the oldest spooled turn is 60s old, so a session costs about one request per minute. A failed send keeps the spool for the next hook. Any failure degrades to an empty hook answer; the mesh never breaks the harness.
 
 ## Codex
 
