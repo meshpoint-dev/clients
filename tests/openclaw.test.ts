@@ -85,12 +85,12 @@ describe("openclaw tap", () => {
     expect(calls.filter((c) => c.url.includes("/v1/recall"))).toHaveLength(1);
   });
 
-  it("uses MESHPOINT_PROJECT for a chat agent and spools turns under the session id", async () => {
+  it("uses MESHPOINT_PROJECT for a chat agent and spools turns under the session key", async () => {
     const d = deps({ env: { MESHPOINT_PROJECT: "support-bot" } });
     expect(await runOpenclawTap(event("message:received", { content: "hello" }), d)).toBe("{}");
-    expect(await runOpenclawTap(event("message:sent", { content: "hi there", success: true }, "agent:main:telegram:123"), d)).toBe("{}");
+    expect(await runOpenclawTap(event("message:sent", { content: "hi there", success: true }), d)).toBe("{}");
     expect(await runOpenclawTap(event("message:sent", { content: "dropped", success: false }), d)).toBe("{}");
-    expect(d.spool.read("sid-1").map((t) => [t.branch, t.body])).toEqual([
+    expect(d.spool.read("agent:main:main").map((t) => [t.branch, t.body])).toEqual([
       ["main", "[user] hello"],
       ["main", "[assistant] hi there"],
     ]);
@@ -108,7 +108,7 @@ describe("openclaw tap", () => {
     for (const key of ["command:new", "command:reset", "session:auto-reset"]) {
       await runOpenclawTap(event("message:received", { content: key }), d);
       expect(await runOpenclawTap(event(key), d)).toBe("{}");
-      expect(d.spool.read("sid-1")).toHaveLength(0);
+      expect(d.spool.read("agent:main:main")).toHaveLength(0);
     }
     expect(calls.filter((c) => c.url.includes("/v1/capture"))).toHaveLength(3);
   });

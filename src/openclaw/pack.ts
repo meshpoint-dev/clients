@@ -68,8 +68,14 @@ function remember(map, key, value) {
   if (map.size > MAX_SESSIONS) map.delete(map.keys().next().value);
 }
 
+// Message events carry only the session key and bootstrap carries both, so the nudge is filed
+// under every id the event names and looked up the same way.
 function sessionOf(event) {
-  return str(event.context?.sessionId) || str(event.sessionKey) || "unknown";
+  return str(event.sessionKey) || str(event.context?.sessionId) || "unknown";
+}
+
+function idsOf(event) {
+  return [str(event.sessionKey), str(event.context?.sessionId)].filter(Boolean);
 }
 
 // Only the fields the tap reads; context.cfg holds the whole Gateway config and must never leave.
@@ -112,8 +118,8 @@ export default async function handler(event) {
         cached = { text: str((await tap(event)).inject) ?? "", at: Date.now() };
         remember(injects, session, cached);
       }
-      const nudge = nudges.get(session);
-      nudges.delete(session);
+      const nudge = idsOf(event).map((id) => nudges.get(id)).find(Boolean);
+      for (const id of idsOf(event)) nudges.delete(id);
       const text = [cached.text, nudge].filter(Boolean).join("\\n\\n");
       if (text && workspaceDir && Array.isArray(event.context.bootstrapFiles)) {
         event.context.bootstrapFiles.push({ name: "MESHPOINT.md", path: \`\${workspaceDir}/MESHPOINT.md\`, content: text, missing: false });
@@ -121,10 +127,12 @@ export default async function handler(event) {
       return;
     }
     const out = await tap(event);
-    if (key === "message:sent" && str(out.nudge)) remember(nudges, session, out.nudge);
+    if (key === "message:sent" && str(out.nudge)) for (const id of idsOf(event)) remember(nudges, id, out.nudge);
     if (key === "command:new" || key === "command:reset" || key === "session:auto-reset") {
-      injects.delete(session);
-      nudges.delete(session);
+      for (const id of idsOf(event)) {
+        injects.delete(id);
+        nudges.delete(id);
+      }
     }
   } catch (err) {
     debug(\`handler failed: \${err instanceof Error ? err.message : String(err)}\`);

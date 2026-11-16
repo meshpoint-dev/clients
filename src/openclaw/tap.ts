@@ -106,8 +106,9 @@ export async function runOpenclawTap(event: OpenclawEvent, deps: OpenclawTapDeps
   const context = event.context ?? {};
   const repo = openclawRepo(context.workspaceDir, deps.env, deps.repo);
   if (!repo) return "{}";
-  // Session keys differ between phases of one conversation; the session id does not.
-  const session = context.sessionId || event.sessionKey || "unknown";
+  // Every event carries the session key; message events carry no session id, so the key is what
+  // ties a reply to the bootstrap that follows it.
+  const session = event.sessionKey || context.sessionId || "unknown";
   const now = deps.now ?? Date.now;
   const tap = new Tap({
     config: deps.config,
