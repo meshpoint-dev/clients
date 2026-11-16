@@ -15,6 +15,7 @@ meshpoint login --device             # force the device code (cloud agents, SSH)
 meshpoint login --base-url https://meshpoint-platform-staging.cmptr.workers.dev   # staging
 meshpoint login --base-url <url> --token <agent token>   # pasted dev token instead
 meshpoint whoami                     # account, org, role
+meshpoint --version                  # installed version
 meshpoint doctor                     # login, repo, connected harnesses, last capture, spool; exit 1 when something is wrong
 meshpoint org | org invite <email> [--owner] | org invites | org remove <user> | org sessions | org revoke <id> | org rotate-key | org projects
 meshpoint logout

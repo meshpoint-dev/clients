@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { connectAntigravity } from "./antigravity/connect.js";
 import { runAntigravityTap, type AntigravityHookPayload } from "./antigravity/tap.js";
 import { connectClaudeCode } from "./claude-code/connect.js";
@@ -33,6 +34,7 @@ const USAGE = `meshpoint <command>
   logout                                   end the session and delete the stored tokens
   whoami                                   account, org and role for the stored token
   status                                   show config and the project for the current directory
+  --version                                print the installed version
   doctor [--json]                          check login, repo, connected harnesses, last capture, spool;
                                            exits 1 when something is wrong
   org                                      org, members and key ids
@@ -135,6 +137,13 @@ async function readStdin(): Promise<string> {
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   switch (cmd) {
+    case "--version":
+    case "-v":
+    case "version": {
+      const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")) as { version: string };
+      process.stdout.write(`${pkg.version}\n`);
+      return 0;
+    }
     case "login": {
       const baseUrl = flag(rest, "--base-url") ?? DEFAULT_BASE_URL;
       const token = flag(rest, "--token");
