@@ -38,12 +38,14 @@ const USAGE = `meshpoint <command>
   doctor [--json]                          check login, repo, connected harnesses, last capture, spool;
                                            exits 1 when something is wrong
   org                                      org, members and key ids
-  org invite <email> [--owner]             invite by email (owner only); accepted at their next login
-  org invites                              pending invites (owner only)
-  org remove <user-id>                     remove a member and revoke their sessions (owner only)
-  org sessions                             logged-in agents (own; all for owners)
+  org invite <email> [--role <role>]       invite by email (admins and owners; member, admin or owner;
+                                           default member, admin and owner by owners only)
+  org invites                              pending invites (admins and owners)
+  org remove <user-id>                     remove a member and revoke their sessions (admins and owners)
+  org role <user-id> <role>                set a member's role to member, admin or owner (owners only)
+  org sessions                             logged-in agents (own; all for admins and owners)
   org revoke <session-id>                  revoke a session
-  org rotate-key [--revoke-sessions]       rotate the org signing key (owner only)
+  org rotate-key [--revoke-sessions]       rotate the org signing key (admins and owners)
   org projects                             projects recorded for the org
   connect [--json]                         list the harnesses on this machine and whether each is connected
   connect <harness> [--project <dir>] [--remove]
@@ -105,13 +107,18 @@ async function orgCommand(args: string[], config: Config): Promise<unknown> {
       return call("GET", "/v1/org");
     case "invite": {
       if (!args[1]) throw new Error("org invite needs an email");
-      return call("POST", "/v1/org/invites", { email: args[1], role: args.includes("--owner") ? "owner" : "member" });
+      const at = args.indexOf("--role");
+      return call("POST", "/v1/org/invites", { email: args[1], role: at === -1 ? "member" : args[at + 1] });
     }
     case "invites":
       return call("GET", "/v1/org/invites");
     case "remove": {
       if (!args[1]) throw new Error("org remove needs a user id");
       return call("DELETE", `/v1/org/members/${encodeURIComponent(args[1])}`);
+    }
+    case "role": {
+      if (!args[1] || !args[2]) throw new Error("org role needs a user id and a role");
+      return call("PATCH", `/v1/org/members/${encodeURIComponent(args[1])}`, { role: args[2] });
     }
     case "sessions":
       return call("GET", "/v1/org/sessions");
@@ -124,7 +131,7 @@ async function orgCommand(args: string[], config: Config): Promise<unknown> {
     case "projects":
       return call("GET", "/v1/org/projects");
     default:
-      throw new Error("org supports: invite, invites, remove, sessions, revoke, rotate-key, projects");
+      throw new Error("org supports: invite, invites, remove, role, sessions, revoke, rotate-key, projects");
   }
 }
 

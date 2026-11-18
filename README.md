@@ -17,7 +17,7 @@ meshpoint login --base-url <url> --token <agent token>   # pasted dev token inst
 meshpoint whoami                     # account, org, role
 meshpoint --version                  # installed version
 meshpoint doctor                     # login, repo, connected harnesses, last capture, spool; exit 1 when something is wrong
-meshpoint org | org invite <email> [--owner] | org invites | org remove <user> | org sessions | org revoke <id> | org rotate-key | org projects
+meshpoint org | org invite <email> [--role <role>] | org invites | org remove <user> | org role <user> <role> | org sessions | org revoke <id> | org rotate-key | org projects
 meshpoint logout
 meshpoint connect                    # which harnesses this machine has and whether each is connected (--json for agents)
 meshpoint connect claude-code        # hooks + skill in ~/.claude/, covers every repo
