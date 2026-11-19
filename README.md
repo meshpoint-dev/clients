@@ -117,3 +117,7 @@ npm run build && node dist/bin.js --help
 ```
 
 Publishing (maintainers, after `npm login`): `npm publish` in `../meshpoint-sdk`, then here. `prepublishOnly` runs the checks and the build; `publishConfig` tags prereleases `next`.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
