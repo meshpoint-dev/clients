@@ -96,6 +96,11 @@ export async function login(opts: LoginOptions): Promise<Config> {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("could not bind a local port");
 
+  const q = new URLSearchParams({ port: String(address.port), nonce, agent });
+  if (opts.org) q.set("org", opts.org);
+  const startUrl = `${opts.baseUrl.replace(/\/+$/, "")}/v1/auth/start?${q}`;
+  let started = false;
+
   const grant = new Promise<Grant>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("login timed out; run meshpoint login again")), opts.timeoutMs ?? LOGIN_TIMEOUT_MS);
     server.on("request", (req, res) => {
@@ -104,6 +109,13 @@ export async function login(opts: LoginOptions): Promise<Config> {
         res.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
         res.end(`<!doctype html><meta charset="utf-8"><title>Meshpoint</title><body style="font-family:system-ui;padding:3rem"><p>${body}</p></body>`);
       };
+      // The browser is sent to this local page first, so the nonce never sits in a process argument
+      // list; the page redirects once to the platform and then goes away.
+      if (url.pathname === "/start" && !started) {
+        started = true;
+        res.writeHead(302, { location: startUrl, "cache-control": "no-store" });
+        return res.end();
+      }
       if (url.pathname !== "/callback" || url.searchParams.get("nonce") !== nonce) return reply(404, "Not found.");
       const error = url.searchParams.get("error");
       if (error) {
@@ -114,7 +126,7 @@ export async function login(opts: LoginOptions): Promise<Config> {
       }
       const code = url.searchParams.get("code");
       if (!code) return reply(400, "Missing code.");
-      api<Grant>(opts.baseUrl, "POST", "/v1/auth/exchange", { body: { code }, fetch: opts.fetch }).then(
+      api<Grant>(opts.baseUrl, "POST", "/v1/auth/exchange", { body: { code, nonce }, fetch: opts.fetch }).then(
         (g) => {
           reply(200, `Logged in to Meshpoint as ${escapeHtml(g.email)} (org ${escapeHtml(g.org_name)}). You can close this tab.`);
           clearTimeout(timer);
@@ -129,11 +141,8 @@ export async function login(opts: LoginOptions): Promise<Config> {
     });
   });
 
-  const q = new URLSearchParams({ port: String(address.port), nonce, agent });
-  if (opts.org) q.set("org", opts.org);
-  const startUrl = `${opts.baseUrl.replace(/\/+$/, "")}/v1/auth/start?${q}`;
   log(`Open this URL to log in (a browser should open):\n  ${startUrl}`);
-  (opts.open ?? openBrowser)(startUrl);
+  (opts.open ?? openBrowser)(`http://127.0.0.1:${address.port}/start`);
   try {
     return configFromGrant(opts.baseUrl, await grant);
   } finally {

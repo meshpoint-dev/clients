@@ -23,7 +23,21 @@ export function configPath(env: Environment = process.env, home = homedir()): st
   return path.join(env.XDG_CONFIG_HOME ?? path.join(home, ".config"), "meshpoint", "config.json");
 }
 
+// Only https reaches the platform; plain http is for a local development server.
+export function allowedBaseUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol === "https:") return true;
+  return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1");
+}
+
 // Environment overrides the file; MESHPOINT_BASE_URL and MESHPOINT_TOKEN are enough on their own.
+// The file's credentials never travel to an environment-supplied URL: a repository can set
+// MESHPOINT_BASE_URL through a harness's project settings, and the hooks inherit that environment.
 export function loadConfig(env: Environment = process.env, home = homedir()): Config | null {
   let fromFile: Partial<Config> = {};
   try {
@@ -33,9 +47,10 @@ export function loadConfig(env: Environment = process.env, home = homedir()): Co
   }
   const baseUrl = env.MESHPOINT_BASE_URL ?? fromFile.baseUrl;
   const token = env.MESHPOINT_TOKEN ?? fromFile.token;
-  if (!baseUrl || !token) return null;
+  if (!baseUrl || !token || !allowedBaseUrl(baseUrl)) return null;
   // An environment token stands alone: file-held refresh state belongs to the file's token.
   if (env.MESHPOINT_TOKEN) return { baseUrl, token };
+  if (env.MESHPOINT_BASE_URL && env.MESHPOINT_BASE_URL !== fromFile.baseUrl) return null;
   return { ...fromFile, baseUrl, token };
 }
 
