@@ -1,6 +1,6 @@
 {
   "name": "@meshpoint/cli",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.4",
   "description": "Meshpoint CLI and harness adapters",
   "keywords": [
     "meshpoint",
@@ -38,7 +38,7 @@
     "prepublishOnly": "npm run check && npm run build"
   },
   "dependencies": {
-    "@meshpoint/sdk": "^1.0.0-rc.2"
+    "@meshpoint/sdk": "^1.0.0-rc.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
