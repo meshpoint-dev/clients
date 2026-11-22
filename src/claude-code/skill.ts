@@ -34,7 +34,9 @@ Each item is an object \`{"kind", "title", "body"}\`. \`kind\` is one of:
 
 - Only what this session established. Never invent.
 - Skip anything already listed under "Team knowledge" in the session-start context unless it changed; a changed decision or status gets a new item.
-- Retract items that this session made wrong or obsolete: a finished todo, a superseded status, a reversed decision. The first column of "Team knowledge" is the item id.
+- An item that replaces an older one (a changed decision, a convention that moved, a todo now split differently) names the old id: add \`--supersedes <id>\` after the \`--item\`. The old item leaves recall and stays linked to the new one. A \`status\` item always replaces the branch's previous status on its own.
+- Retract items that this session made wrong: a finished todo, a reversed decision with nothing in its place. The first column of "Team knowledge" is the item id.
+- \`status\` and \`todo\` items leave recall on their own after 30 days without confirmation; the durable kinds stay until replaced or retracted.
 - Items under "Possibly stale" name a file that is gone from this checkout. Check whether each still holds; retract it or write a corrected item. Do not leave them.
 - Name files by their repo-relative path (\`src/auth/token.ts\`, not "the token file"). Meshpoint links the item to those files, checks them in later checkouts, and shows the item when someone edits them. The command warns about paths it cannot find.
 - Prefer durable knowledge over moment-to-moment detail. Aim for 5 to 30 items; one \`status\` item at most.
@@ -42,11 +44,12 @@ Each item is an object \`{"kind", "title", "body"}\`. \`kind\` is one of:
 
 ## Procedure
 
-Run \`meshpoint items put\` once, one \`--item kind title body\` per item. Single-quote title and body and keep the single quote character out of them (write "do not", not "don't"). No JSON, no heredoc.
+Run \`meshpoint items put\` once, one \`--item kind title body\` per item, each optionally followed by \`--supersedes <id>\` (the item it replaces) or \`--key <slot>\` (a stable slot such as \`test-runner\`; a later item with the same key replaces this one). Single-quote title and body and keep the single quote character out of them (write "do not", not "don't"). No JSON, no heredoc.
 
 \`\`\`bash
 meshpoint items put \\
-  --item decision 'Short title' 'What was chosen and why, with file names and values.' \\
+  --item decision 'Short title' 'What was chosen and why, with file names and values.' --supersedes 7d0e44aa \\
+  --item convention 'Tests run with pnpm test' 'package.json scripts.test; CI runs the same.' --key test-runner \\
   --item gotcha 'Short title' 'What bit and how to avoid it.'
 \`\`\`
 

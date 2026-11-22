@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+
+- `items put` takes `--supersedes <id>[,<id>]` and `--key <slot>` after an `--item` (and `supersedes`, `key` in the JSON form). Supersedes prefixes resolve like retract. The replaced item leaves recall with a link to its successor; a `status` item always replaces the branch's previous status.
+- `status` and `todo` items unconfirmed for 30 days are left out of the inject and the edit notice, even when a cached blob still carries them.
+- The skill explains supersedes, keys and decay. Depends on `@meshpoint/sdk` 1.2.0.
+
 ## 1.1.0
 
 Memory follows the code.

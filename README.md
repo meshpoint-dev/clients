@@ -33,6 +33,8 @@ meshpoint items put --item gotcha 'title' 'body'   # write items for the current
 meshpoint items put < items.json     # same, as a JSON array of {kind, title, body}
 meshpoint items retract 3f9c1a2b     # retract by id or unique id prefix
 meshpoint items confirm 3f9c1a2b     # confirm by id or prefix (counts toward rank)
+meshpoint items put --item decision 'New choice' 'Why.' --supersedes 7d0e44aa   # replaces the old item
+meshpoint items put --item convention 'Tests: pnpm test' 'scripts.test' --key test-runner  # stable slot
 ```
 
 `connect <harness>` without `--project` writes to your user config, so every repo you open is on the mesh. `--project <dir>` writes into one repo instead; the files then travel with the repo in git. The meshpoint testbed on the maintainers' machines uses `--project` only.

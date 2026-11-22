@@ -12,7 +12,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 function item(id: string, over: Partial<Item>): Item {
-  return { id, branch: "master", kind: "gotcha", title: id, body: "b", created_at: 1, confirmations: 0, retracted: 0, provenance: "", refs: [], paths: [], commit_sha: "", state: "ok", verified_at: 0, stale_count: 0, ...over };
+  return { id, branch: "master", kind: "gotcha", title: id, body: "b", created_at: 1, confirmations: 0, retracted: 0, provenance: "", refs: [], paths: [], commit_sha: "", state: "ok", verified_at: 0, stale_count: 0, key: "", superseded_by: "", confirmed_at: 0, ...over };
 }
 
 describe("edit context", () => {
@@ -26,9 +26,10 @@ describe("edit context", () => {
       item("dropped", { kind: "decision", refs: ["src/a.ts"], state: "dropped" }),
       item("stale", { kind: "decision", refs: ["src/a.ts"] }),
       item("retracted", { kind: "decision", refs: ["src/a.ts"], retracted: 1 }),
+      item("superseded", { kind: "decision", refs: ["src/a.ts"], state: "superseded", superseded_by: "d" }),
       item("other", { kind: "gotcha", refs: ["src/b.ts"] }),
     ];
-    expect(itemsForFile(items, { stale: "stale" }, "src/a.ts").map((i) => i.id)).toEqual(["d", "g-new"]);
+    expect(itemsForFile(items, { stale: "stale" }, "src/a.ts", 10).map((i) => i.id)).toEqual(["d", "g-new"]);
     expect(itemsForFile(items, {}, "src/none.ts")).toEqual([]);
   });
 

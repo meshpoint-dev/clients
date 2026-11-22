@@ -15,6 +15,26 @@ export interface ItemDraft {
   kind: Kind;
   title: string;
   body: string;
+  // Slot per branch and kind; a new item with the same key replaces the old one.
+  key?: string;
+  // Id prefixes (as shown in the inject) of items this one replaces.
+  supersedes?: string[];
+}
+
+const KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const SUPERSEDES_MAX = 20;
+
+function withKey(d: ItemDraft, i: number | string, key: unknown): ItemDraft {
+  if (typeof key !== "string" || !KEY_RE.test(key)) throw new Error(`item ${i}: key must be 1-128 characters of letters, digits, . _ : / -`);
+  return { ...d, key };
+}
+
+function withSupersedes(d: ItemDraft, i: number | string, ids: unknown): ItemDraft {
+  const list = typeof ids === "string" ? ids.split(",") : ids;
+  if (!Array.isArray(list) || !list.every((s) => typeof s === "string")) throw new Error(`item ${i}: supersedes must be a list of item ids`);
+  const clean = list.map((s) => s.trim()).filter(Boolean);
+  if (clean.length === 0 || clean.length > SUPERSEDES_MAX) throw new Error(`item ${i}: supersedes takes 1 to ${SUPERSEDES_MAX} item ids`);
+  return { ...d, supersedes: [...(d.supersedes ?? []), ...clean] };
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -28,13 +48,23 @@ function draft(i: number | string, kind: unknown, title: unknown, body: unknown)
   return { kind: kind as Kind, title: title.trim().slice(0, TITLE_MAX), body: body.trim().slice(0, BODY_MAX) };
 }
 
-// `--item <kind> <title> <body>`, repeated. Plain arguments: no JSON for a shell guard to object to.
+// `--item <kind> <title> <body>`, repeated, each followed by optional `--key <key>` and
+// `--supersedes <id>[,<id>]` modifiers. Plain arguments: no JSON for a shell guard to object to.
 export function parseItemArgs(args: readonly string[]): ItemDraft[] {
   const drafts: ItemDraft[] = [];
   for (let i = 0; i < args.length; i += 1) {
-    if (args[i] !== "--item") throw new Error(`unexpected argument ${args[i]}`);
-    drafts.push(draft(drafts.length, args[i + 1], args[i + 2], args[i + 3]));
-    i += 3;
+    const arg = args[i];
+    const last = drafts.length - 1;
+    if (arg === "--item") {
+      drafts.push(draft(drafts.length, args[i + 1], args[i + 2], args[i + 3]));
+      i += 3;
+    } else if (arg === "--key" && last >= 0) {
+      drafts[last] = withKey(drafts[last] as ItemDraft, last, args[i + 1]);
+      i += 1;
+    } else if (arg === "--supersedes" && last >= 0) {
+      drafts[last] = withSupersedes(drafts[last] as ItemDraft, last, args[i + 1]);
+      i += 1;
+    } else throw new Error(`unexpected argument ${arg}`);
   }
   if (drafts.length === 0) throw new Error("no items");
   if (drafts.length > ITEMS_MAX) throw new Error(`at most ${ITEMS_MAX} items per put`);
@@ -53,7 +83,10 @@ export function parseItems(raw: string): ItemDraft[] {
   if (parsed.length > ITEMS_MAX) throw new Error(`at most ${ITEMS_MAX} items per put`);
   return parsed.map((v, i) => {
     if (!isRecord(v)) throw new Error(`item ${i}: not an object`);
-    return draft(i, v.kind, v.title, v.body);
+    let d = draft(i, v.kind, v.title, v.body);
+    if (v.key !== undefined && v.key !== "") d = withKey(d, i, v.key);
+    if (v.supersedes !== undefined) d = withSupersedes(d, i, v.supersedes);
+    return d;
   });
 }
 
@@ -84,20 +117,25 @@ export interface PutDeps extends ItemDeps {
 
 // Each item gets its refs (paths named in its text that exist in the checkout), the paths edited
 // since the branch's last checkpoint, and HEAD. Path-like tokens that resolve to nothing come
-// back as `missing` so the writer can fix a typo.
-export async function putItems(drafts: ItemDraft[], deps: PutDeps): Promise<{ count: number; missing: string[] }> {
+// back as `missing` so the writer can fix a typo. Supersedes prefixes are resolved against the
+// branch's live items before the write, the way retract resolves them.
+export async function putItems(drafts: ItemDraft[], deps: PutDeps): Promise<{ count: number; superseded: number; missing: string[] }> {
   const now = deps.now ?? Date.now;
   const { project, branch, root } = deps.repo;
+  const client = clientFor(deps);
   const since = deps.checkpoints.lastCheckpoint(project, branch);
   const paths = deps.touched?.since(project, branch, since) ?? [];
   const commit_sha = (deps.sha ?? headSha)(root);
   const missing = new Set<string>();
-  const items: ItemInput[] = drafts.map((d) => {
+  const items: ItemInput[] = [];
+  for (const d of drafts) {
+    const { supersedes: prefixes, ...rest } = d;
     const found = extractRefs(`${d.title}\n${d.body}`, root, deps.exists);
     for (const m of found.missing) missing.add(m);
-    return { id: randomUUID(), ...d, refs: found.refs, paths, ...(commit_sha ? { commit_sha } : {}) };
-  });
-  const out = await clientFor(deps).putItems(items);
+    const supersedes = prefixes ? await resolveIds(prefixes, deps, client) : undefined;
+    items.push({ id: randomUUID(), ...rest, refs: found.refs, paths, ...(commit_sha ? { commit_sha } : {}), ...(supersedes ? { supersedes } : {}) });
+  }
+  const out = await client.putItems(items);
   deps.checkpoints.markCheckpoint(project, branch, now());
   deps.touched?.clear(project, branch);
   return { ...out, missing: [...missing] };

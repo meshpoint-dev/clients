@@ -127,6 +127,9 @@ describe("claude code tap", () => {
       { id: "g1aaaaaa", kind: "gotcha", title: "Lock order", body: "a before b", branch: "master", created_at: 2, confirmations: 0, retracted: 0, provenance: "", refs: ["src/lock.ts"], paths: [], commit_sha: "", state: "ok", verified_at: 0, stale_count: 0 },
       { id: "f1aaaaaa", kind: "fact", title: "Node 22", body: "ci pins it", branch: "master", created_at: 1, confirmations: 0, retracted: 0, provenance: "", refs: ["ci.yml"], paths: [], commit_sha: "", state: "ok", verified_at: 0, stale_count: 0 },
       { id: "s1aaaaaa", kind: "fact", title: "Server says suspect", body: "x", branch: "master", created_at: 1, confirmations: 0, retracted: 0, provenance: "", refs: [], paths: [], commit_sha: "", state: "suspect", verified_at: 0, stale_count: 0 },
+      // Left out: an old todo nobody confirmed, and an item a newer one replaced, even if a cached blob carries them.
+      { id: "t0aaaaaa", kind: "todo", title: "Old todo", body: "x", branch: "master", created_at: 1, confirmations: 0, retracted: 0, provenance: "", refs: [], paths: [], commit_sha: "", state: "ok", verified_at: 0, stale_count: 0, confirmed_at: 0 },
+      { id: "r0aaaaaa", kind: "decision", title: "Replaced", body: "x", branch: "master", created_at: 1, confirmations: 0, retracted: 0, provenance: "", refs: [], paths: [], commit_sha: "", state: "superseded", superseded_by: "d1aaaaaa", verified_at: 0, stale_count: 0 },
     ];
     const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -150,6 +153,8 @@ describe("claude code tap", () => {
     expect(text).toContain("- s1aaaaaa? [fact] Server says suspect: x");
     expect(text).toContain("## Possibly stale (a referenced file is gone; verify, then retract or rewrite)\n- f1aaaaaa [fact] Node 22");
     expect(text).not.toContain("Node 22: ci pins it");
+    expect(text).not.toContain("Old todo");
+    expect(text).not.toContain("Replaced");
     // No import nudge: the branch has items.
     expect(text).not.toContain("meshpoint-import");
     const verify = calls.find((c) => c.url.endsWith("/v1/items/verify"));
@@ -159,7 +164,7 @@ describe("claude code tap", () => {
       { id: "f1aaaaaa", result: "stale" },
     ]);
     expect(cache.loadRecall("s1")).toMatchObject({ project: "github.com--acme--web", branch: "master", verdicts: { d1aaaaaa: "verified", f1aaaaaa: "stale" } });
-    expect(cache.loadRecall("s1")?.items).toHaveLength(4);
+    expect(cache.loadRecall("s1")?.items).toHaveLength(6);
 
     // The edit hook: cached items for the file (not the stale one), presence from the origin, once per file.
     fetchImpl.mockImplementation(async (input: string | URL | Request) => {

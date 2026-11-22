@@ -1,5 +1,5 @@
 import path from "node:path";
-import { MeshpointClient, MeshpointError, redact, type Item, type Presence, type RecallResponse } from "@meshpoint/sdk";
+import { isExpired, MeshpointClient, MeshpointError, redact, type Item, type Presence, type RecallResponse } from "@meshpoint/sdk";
 import type { Checkpoints } from "./checkpoints.js";
 import { SKILL_NAME } from "./claude-code/skill.js";
 import type { TranscriptEntry } from "./claude-code/transcript.js";
@@ -268,10 +268,12 @@ export function renderInject(repo: RepoContext, recall: RecallResponse, presence
   if (recall.checkpoint) {
     lines.push("", `## Last checkpoint (${age(now - recall.checkpoint.created_at)})`, recall.checkpoint.body);
   }
-  const stale = recall.items.filter((i) => verdicts.get(i.id) === "stale");
+  // A blob served from the edge may predate an item's expiry or replacement; apply both rules here too.
+  const current = recall.items.filter((i) => !i.retracted && i.state !== "dropped" && i.state !== "superseded" && !isExpired(i, now));
+  const stale = current.filter((i) => verdicts.get(i.id) === "stale");
   const live: Item[] = [];
   let used = 0;
-  for (const i of recall.items) {
+  for (const i of current) {
     if (verdicts.get(i.id) === "stale") continue;
     const t = estimateTokens(i);
     if (used + t > INJECT_BUDGET_TOKENS) break;

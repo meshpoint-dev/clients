@@ -30,6 +30,32 @@ describe("items put", () => {
     expect(() => parseItemArgs(["--bogus"])).toThrow(/unexpected argument/);
   });
 
+  it("takes --supersedes and --key after an item, in arguments and in JSON", () => {
+    expect(parseItemArgs(["--item", "decision", "T", "B", "--supersedes", "7d0e44aa,3f9c", "--key", "deploy-target", "--item", "todo", "T2", "B2"])).toEqual([
+      { kind: "decision", title: "T", body: "B", supersedes: ["7d0e44aa", "3f9c"], key: "deploy-target" },
+      { kind: "todo", title: "T2", body: "B2" },
+    ]);
+    expect(() => parseItemArgs(["--key", "x", "--item", "todo", "T", "B"])).toThrow(/unexpected argument/);
+    expect(() => parseItemArgs(["--item", "todo", "T", "B", "--key", "bad key"])).toThrow(/key must be/);
+    expect(() => parseItemArgs(["--item", "todo", "T", "B", "--supersedes", ","])).toThrow(/supersedes takes/);
+    expect(parseItems('[{"kind":"convention","title":"T","body":"B","key":"test-runner","supersedes":["abcd"]}]')).toEqual([{ kind: "convention", title: "T", body: "B", key: "test-runner", supersedes: ["abcd"] }]);
+  });
+
+  it("resolves supersedes prefixes against the branch before writing", async () => {
+    const calls: { url: string; body: any }[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : undefined });
+      if (url.includes("/v1/recall")) return Response.json({ project: "p", branch: "master", checkpoint: null, items: [{ id: "abcd1234-x" }, { id: "ef001234-y" }], generated_at: 1, source: "do" });
+      return Response.json({ count: 1, superseded: 1 }, { status: 202 });
+    });
+    const deps = { config: { baseUrl: "https://api.test", token: "tok" }, repo: { project: "p", branch: "master", root: "/repo" }, fetch: fetchImpl as unknown as typeof fetch, checkpoints: new Checkpoints(dir), exists: () => false, sha: () => "" };
+    const out = await putItems([{ kind: "decision", title: "t", body: "b", supersedes: ["abcd"], key: "k" }], deps);
+    expect(out).toEqual({ count: 1, superseded: 1, missing: [] });
+    expect(calls.at(-1)?.body.items[0]).toMatchObject({ kind: "decision", key: "k", supersedes: ["abcd1234-x"] });
+    await expect(putItems([{ kind: "decision", title: "t", body: "b", supersedes: ["zz"] }], deps)).rejects.toThrow(/no item on master/);
+  });
+
   it("posts items with fresh ids and records the branch checkpoint", async () => {
     const calls: { url: string; body: any }[] = [];
     const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

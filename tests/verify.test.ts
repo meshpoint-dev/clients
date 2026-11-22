@@ -12,7 +12,7 @@ let commitDate = "2025-12-31T00:00:00Z";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, GIT_AUTHOR_DATE: commitDate, GIT_COMMITTER_DATE: commitDate } }).toString().trim();
 
 function item(id: string, over: Partial<Item>): Item {
-  return { id, branch: "master", kind: "fact", title: id, body: "b", created_at: Date.parse("2026-01-01T00:00:00Z"), confirmations: 0, retracted: 0, provenance: "", refs: [], paths: [], commit_sha: "", state: "ok", verified_at: 0, stale_count: 0, ...over };
+  return { id, branch: "master", kind: "fact", title: id, body: "b", created_at: Date.parse("2026-01-01T00:00:00Z"), confirmations: 0, retracted: 0, provenance: "", refs: [], paths: [], commit_sha: "", state: "ok", verified_at: 0, stale_count: 0, key: "", superseded_by: "", confirmed_at: 0, ...over };
 }
 
 beforeEach(() => {

@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { Item, Presence } from "@meshpoint/sdk";
+import { isExpired, type Item, type Presence } from "@meshpoint/sdk";
 import type { Verdict } from "./verify.js";
 
 // Per-session state for the edit hook: the branch's items as seen at session start (with the
@@ -85,9 +85,9 @@ export class SessionCache {
 // locally stale, ranked the way recall ranks them (kind weight, then recency, then confirmations).
 const KIND_WEIGHT: Record<string, number> = { decision: 5, gotcha: 4, convention: 3, fact: 2, status: 2, todo: 1 };
 
-export function itemsForFile(items: readonly Item[], verdicts: Readonly<Record<string, Verdict>>, filePath: string): Item[] {
+export function itemsForFile(items: readonly Item[], verdicts: Readonly<Record<string, Verdict>>, filePath: string, now = Date.now()): Item[] {
   return items
-    .filter((i) => !i.retracted && i.state !== "dropped" && EDIT_KINDS.has(i.kind) && verdicts[i.id] !== "stale")
+    .filter((i) => !i.retracted && i.state !== "dropped" && i.state !== "superseded" && !isExpired(i, now) && EDIT_KINDS.has(i.kind) && verdicts[i.id] !== "stale")
     .filter((i) => i.refs.includes(filePath) || i.paths.includes(filePath))
     .sort((a, b) => (KIND_WEIGHT[b.kind] ?? 0) - (KIND_WEIGHT[a.kind] ?? 0) || b.created_at - a.created_at || b.confirmations - a.confirmations)
     .slice(0, EDIT_ITEMS_MAX);
