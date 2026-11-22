@@ -1,6 +1,6 @@
 # meshpoint clients
 
-The `meshpoint` CLI and harness adapters for Meshpoint 1.0. Adapters: Claude Code, Codex, Cursor, Antigravity, pi, opencode, OpenClaw. Claude Code, Codex, pi, opencode and OpenClaw are verified live against staging; Cursor and Antigravity are ported from their published hook docs and need a live check.
+The `meshpoint` CLI and harness adapters for Meshpoint, shared agent memory for developer teams. Adapters: Claude Code, Codex, Cursor, Antigravity, pi, opencode, OpenClaw. Claude Code, Codex, pi, opencode and OpenClaw are verified live against staging; Cursor and Antigravity are ported from their published hook docs and need a live check.
 
 ## Install
 
