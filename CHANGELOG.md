@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0
+
+Every capture carries the harness session id, so the console's Sessions view groups turns into exact runs. Depends on `@meshpoint/sdk` 1.3.0.
+
 ## 1.2.0
 
 - `items put` takes `--supersedes <id>[,<id>]` and `--key <slot>` after an `--item` (and `supersedes`, `key` in the JSON form). Supersedes prefixes resolve like retract. The replaced item leaves recall with a link to its successor; a `status` item always replaces the branch's previous status.

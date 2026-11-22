@@ -184,6 +184,7 @@ export class Tap {
       token: this.config.token,
       project: this.repo.project,
       branch,
+      session: this.deps.session,
       ...(this.deps.fetch ? { fetch: this.deps.fetch } : {}),
       ...(onError ? { onError } : {}),
     });

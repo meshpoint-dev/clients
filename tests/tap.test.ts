@@ -217,6 +217,7 @@ describe("claude code tap", () => {
     await runClaudeCodeTap(payload("UserPromptSubmit", { prompt: "and docs" }), d);
     const capture = calls.find((c) => c.url.includes("/v1/capture"));
     expect(capture?.body.turns.map((t: { body: string }) => t.body)).toEqual(["[user] add tests", "[assistant] Added.", "[user] and docs"]);
+    expect(capture?.body.session).toBe("s1");
     expect(capture?.body.turns[1].paths).toEqual(["tests/a.test.ts"]);
     expect(d.spool.read("s1")).toHaveLength(0);
   });
