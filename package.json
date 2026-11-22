@@ -38,7 +38,7 @@
     "prepublishOnly": "npm run check && npm run build"
   },
   "dependencies": {
-    "@meshpoint/sdk": "^1.0.0-rc.3"
+    "@meshpoint/sdk": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
