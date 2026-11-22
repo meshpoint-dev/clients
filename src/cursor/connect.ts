@@ -1,13 +1,14 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { skillMarkdown, SKILL_NAME } from "../claude-code/skill.js";
+import { IMPORT_SKILL_NAME, importSkillMarkdown, skillMarkdown, SKILL_NAME } from "../claude-code/skill.js";
 
 export const CURSOR_TAP_COMMAND = "meshpoint tap cursor";
 const HOOK_TIMEOUT_S = 30;
 
-// afterAgentResponse carries the reply text; stop only decides on the checkpoint nudge.
-export const CURSOR_EVENTS = ["sessionStart", "beforeSubmitPrompt", "afterAgentResponse", "stop", "preCompact", "sessionEnd"] as const;
+// afterAgentResponse carries the reply text; stop only decides on the checkpoint nudge;
+// postToolUse is where a file notice can reach the agent (additional_context).
+export const CURSOR_EVENTS = ["sessionStart", "beforeSubmitPrompt", "postToolUse", "afterAgentResponse", "stop", "preCompact", "sessionEnd"] as const;
 
 interface CursorHook {
   readonly command: string;
@@ -73,6 +74,7 @@ export function connectCursor(opts: { remove: boolean; projectDir?: string; path
     if (next.hooks) writeFileSync(paths.hooks, `${JSON.stringify(next, null, 2)}\n`);
     else rmSync(paths.hooks, { force: true });
     rmSync(paths.skillDir, { recursive: true, force: true });
+    rmSync(path.join(path.dirname(paths.skillDir), IMPORT_SKILL_NAME), { recursive: true, force: true });
     return `removed meshpoint hooks from ${paths.hooks} and ${paths.skillDir}`;
   }
   mkdirSync(path.dirname(paths.hooks), { recursive: true });
@@ -80,5 +82,8 @@ export function connectCursor(opts: { remove: boolean; projectDir?: string; path
   mkdirSync(paths.skillDir, { recursive: true });
   // Cursor's SKILL.md frontmatter takes name and description; allowed-tools is Claude Code only.
   writeFileSync(path.join(paths.skillDir, "SKILL.md"), skillMarkdown({ allowedTools: false }));
+  const importDir = path.join(path.dirname(paths.skillDir), IMPORT_SKILL_NAME);
+  mkdirSync(importDir, { recursive: true });
+  writeFileSync(path.join(importDir, "SKILL.md"), importSkillMarkdown({ allowedTools: false }));
   return `installed meshpoint hooks in ${paths.hooks} (${CURSOR_EVENTS.join(", ")}) and ${paths.skillDir}/SKILL.md. Cursor reloads hooks.json on save; the Hooks tab under Customize lists them.`;
 }

@@ -33,7 +33,8 @@ export interface OpencodeHooks {
   "chat.message": (input: { sessionID: string; agent?: string; model?: OpencodeModel }, output: { parts: OpencodePart[] }) => Promise<void>;
   "experimental.chat.system.transform": (input: { sessionID?: string }, output: { system: string[] }) => Promise<void>;
   "experimental.text.complete": (input: { sessionID: string; messageID: string }, output: { text: string }) => Promise<void>;
-  "tool.execute.after": (input: { tool: string; sessionID: string; args: unknown }) => Promise<void>;
+  // `output` is the tool result the model sees; text appended to `output.output` reaches it.
+  "tool.execute.after": (input: { tool: string; sessionID: string; args: unknown }, output?: { title?: string; output?: string; metadata?: unknown }) => Promise<void>;
   "experimental.session.compacting": (input: { sessionID: string }) => Promise<void>;
 }
 
@@ -220,11 +221,16 @@ export function createOpencodeHooks(deps: OpencodeHookDeps): OpencodeHooks {
       await enqueue(s, (tap) => tap.assistant(text, paths));
     },
 
-    "tool.execute.after": async (input) => {
+    "tool.execute.after": async (input, output) => {
       const s = tracked(input.sessionID);
       if (!s || !WRITE_TOOLS.has(input.tool) || !isRecord(input.args)) return;
       const file = input.args.filePath;
-      if (typeof file === "string" && file) s.paths.push(file);
+      if (typeof file !== "string" || !file) return;
+      s.paths.push(file);
+      // The file notice rides on the tool result, the one place opencode lets a plugin speak mid-run.
+      await s.opened;
+      const notice = s.tap ? await s.tap.edit(file).catch(() => "") : "";
+      if (notice && output && typeof output.output === "string") output.output = `${output.output}\n\n${notice}`;
     },
 
     "experimental.session.compacting": async (input) => {

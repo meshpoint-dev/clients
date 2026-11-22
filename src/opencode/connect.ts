@@ -2,7 +2,7 @@ import { lstatSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:f
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { skillMarkdown, SKILL_NAME } from "../claude-code/skill.js";
+import { IMPORT_SKILL_NAME, importSkillMarkdown, skillMarkdown, SKILL_NAME } from "../claude-code/skill.js";
 import type { Environment } from "../config.js";
 
 export function opencodeConfigDir(env: Environment = process.env, home = homedir()): string {
@@ -35,6 +35,7 @@ export function connectOpencode(opts: { remove: boolean; configDir?: string; plu
   if (opts.remove) {
     rmSync(paths.plugin, { force: true });
     rmSync(paths.skillDir, { recursive: true, force: true });
+    rmSync(path.join(path.dirname(paths.skillDir), IMPORT_SKILL_NAME), { recursive: true, force: true });
     return `removed meshpoint plugin ${paths.plugin} and ${paths.skillDir}`;
   }
   const target = opts.pluginFile ?? PLUGIN_FILE;
@@ -43,5 +44,8 @@ export function connectOpencode(opts: { remove: boolean; configDir?: string; plu
   symlinkSync(target, paths.plugin);
   mkdirSync(paths.skillDir, { recursive: true });
   writeFileSync(path.join(paths.skillDir, "SKILL.md"), skillMarkdown({ allowedTools: false }));
+  const importDir = path.join(path.dirname(paths.skillDir), IMPORT_SKILL_NAME);
+  mkdirSync(importDir, { recursive: true });
+  writeFileSync(path.join(importDir, "SKILL.md"), importSkillMarkdown({ allowedTools: false }));
   return `installed meshpoint plugin ${paths.plugin} -> ${target} and ${paths.skillDir}/SKILL.md. Restart opencode to load it.`;
 }

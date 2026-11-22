@@ -44,6 +44,9 @@ function deps(over: Partial<TapDeps> = {}): TapDeps {
     if (url.includes("/v1/presence")) {
       return Response.json({ presence: [{ agent: "agent-2", user: "sam", branch: "master", paths: ["src/x.ts"], updated_at: clock - 30_000 }] });
     }
+    if (url.includes("/v1/context")) {
+      return Response.json({ items: [{ id: "g1", kind: "gotcha", title: "Mind the lock", body: "held across awaits", branch: "master", created_at: 1, confirmations: 0, retracted: 0, provenance: "", refs: ["src/x.ts"], paths: [], commit_sha: "", state: "ok", verified_at: 0, stale_count: 0 }], presence: [] });
+    }
     return Response.json({ accepted: 1 }, { status: 202 });
   });
   return {
@@ -99,6 +102,14 @@ describe("cursor tap", () => {
     expect(await runCursorTap(payload("beforeSubmitPrompt", { prompt: "add tests", attachments: [] }), d)).toBe('{"continue":true}');
     expect(await runCursorTap(payload("beforeSubmitPrompt", { prompt: "Meshpoint checkpoint due (20 replies since the last one). Run the meshpoint skill now, then continue." }), d)).toBe('{"continue":true}');
     expect(d.spool.read("c1").map((t) => t.body)).toEqual(["[user] add tests"]);
+  });
+
+  it("answers postToolUse on a file edit with the file notice as additional_context", async () => {
+    const d = deps();
+    const out = JSON.parse(await runCursorTap(payload("postToolUse", { tool_name: "edit_file", tool_input: { file_path: "/repo/src/x.ts" } }), d));
+    expect(out).toEqual({ additional_context: "Meshpoint, src/x.ts:\n- [gotcha] Mind the lock: held across awaits" });
+    expect(calls.at(-1)?.url).toContain("/v1/context?project=github.com--acme--web&branch=master&path=src%2Fx.ts");
+    expect(await runCursorTap(payload("postToolUse", { tool_name: "shell", tool_input: { command: "ls" } }), d)).toBe("{}");
   });
 
   it("captures the reply from afterAgentResponse with the transcript's touched paths, then sends after 60s", async () => {

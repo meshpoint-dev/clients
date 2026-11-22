@@ -1,7 +1,10 @@
 import type { Checkpoints } from "../checkpoints.js";
+import { patchFilePaths } from "../codex/transcript.js";
 import type { Config, RepoContext } from "../config.js";
+import type { SessionCache } from "../context.js";
 import type { Spool } from "../spool.js";
-import { Tap } from "../tap.js";
+import { Tap, type LocalChecks } from "../tap.js";
+import type { Touched } from "../touched.js";
 import { lastAssistantTurn, parseTranscript as parseClaudeCodeTranscript, type TranscriptEntry } from "./transcript.js";
 
 export { renderInject } from "../tap.js";
@@ -16,6 +19,24 @@ export interface HookPayload {
   trigger?: string;
   reason?: string;
   stop_hook_active?: boolean;
+  // PreToolUse and PostToolUse.
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+}
+
+const TOOL_PATH_KEYS = ["file_path", "path", "notebook_path"] as const;
+// One apply_patch can touch several files; the notice covers the first few.
+const PATCH_FILES_MAX = 3;
+
+// The files an editing tool call is about: Claude Code names one in tool_input; Codex's
+// apply_patch carries the whole patch in tool_input.command.
+export function toolFilePaths(input: Record<string, unknown> | undefined): string[] {
+  for (const key of TOOL_PATH_KEYS) {
+    const v = input?.[key];
+    if (typeof v === "string" && v) return [v];
+  }
+  const command = input?.command;
+  return typeof command === "string" ? patchFilePaths(command).slice(0, PATCH_FILES_MAX) : [];
 }
 
 export interface TapDeps {
@@ -30,6 +51,10 @@ export interface TapDeps {
   fetch?: typeof fetch;
   presenceWaitMs?: number;
   refresh?: () => Promise<Config | null>;
+  touched?: Touched;
+  cache?: SessionCache;
+  // Built per repository root: verification and instruction-file lookup need the checkout.
+  local?: (root: string) => LocalChecks;
 }
 
 // One hook event in, one JSON answer out. Claude Code and Codex share the hook protocol (event
@@ -50,6 +75,9 @@ export async function runClaudeCodeTap(payload: HookPayload, deps: TapDeps): Pro
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
     ...(deps.presenceWaitMs !== undefined ? { presenceWaitMs: deps.presenceWaitMs } : {}),
     ...(deps.refresh ? { refresh: deps.refresh } : {}),
+    ...(deps.touched ? { touched: deps.touched } : {}),
+    ...(deps.cache ? { cache: deps.cache } : {}),
+    ...(deps.local ? { local: deps.local(repo.root) } : {}),
   });
 
   const transcript = (): TranscriptEntry[] => {
@@ -69,6 +97,15 @@ export async function runClaudeCodeTap(payload: HookPayload, deps: TapDeps): Pro
     case "UserPromptSubmit":
       await tap.user(payload.prompt ?? "");
       return "{}";
+    case "PreToolUse":
+    case "PostToolUse": {
+      const notices: string[] = [];
+      for (const file of toolFilePaths(payload.tool_input)) {
+        const text = await tap.edit(file);
+        if (text) notices.push(text);
+      }
+      return notices.length > 0 ? JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: notices.join("\n\n") } }) : "{}";
+    }
     case "Stop": {
       const entries = transcript();
       const turn = lastAssistantTurn(entries);

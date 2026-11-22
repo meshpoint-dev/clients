@@ -1,4 +1,4 @@
-import type { TapDeps } from "../claude-code/tap.js";
+import { toolFilePaths, type TapDeps } from "../claude-code/tap.js";
 import { lastAssistantTurn, type TranscriptEntry } from "../claude-code/transcript.js";
 import { NUDGE_PREFIX, Tap } from "../tap.js";
 import { parseCursorTranscript } from "./transcript.js";
@@ -20,6 +20,10 @@ export interface CursorHookPayload {
   // stop: "completed" | "aborted" | "error", and how many follow-ups this conversation has had.
   status?: string;
   loop_count?: number;
+  // postToolUse: the tool and its input; file tools carry file_path.
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  file_path?: string;
 }
 
 const CONTINUE = '{"continue":true}';
@@ -43,6 +47,9 @@ export async function runCursorTap(payload: CursorHookPayload, deps: TapDeps): P
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
     ...(deps.presenceWaitMs !== undefined ? { presenceWaitMs: deps.presenceWaitMs } : {}),
     ...(deps.refresh ? { refresh: deps.refresh } : {}),
+    ...(deps.touched ? { touched: deps.touched } : {}),
+    ...(deps.cache ? { cache: deps.cache } : {}),
+    ...(deps.local ? { local: deps.local(repo.root) } : {}),
   });
 
   const transcript = (): TranscriptEntry[] => {
@@ -64,6 +71,16 @@ export async function runCursorTap(payload: CursorHookPayload, deps: TapDeps): P
       const prompt = payload.prompt ?? "";
       await tap.user(prompt.startsWith(NUDGE_PREFIX) ? "" : prompt);
       return CONTINUE;
+    }
+    case "postToolUse": {
+      // After a file edit: the only Cursor event around a tool call that takes additional_context.
+      const files = payload.file_path ? [payload.file_path] : toolFilePaths(payload.tool_input);
+      const notices: string[] = [];
+      for (const file of files) {
+        const text = await tap.edit(file);
+        if (text) notices.push(text);
+      }
+      return notices.length > 0 ? JSON.stringify({ additional_context: notices.join("\n\n") }) : "{}";
     }
     case "afterAgentResponse": {
       // The documented text field is the reply; the transcript, when readable, adds the touched paths.

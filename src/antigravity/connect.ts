@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { skillMarkdown, SKILL_NAME } from "../claude-code/skill.js";
+import { IMPORT_SKILL_NAME, importSkillMarkdown, skillMarkdown, SKILL_NAME } from "../claude-code/skill.js";
 
 export const ANTIGRAVITY_TAP_COMMAND = "meshpoint tap antigravity";
 export const MESHPOINT_GROUP = "meshpoint";
@@ -52,11 +52,15 @@ export function connectAntigravity(opts: { remove: boolean; projectDir?: string;
     if (Object.keys(next).length > 0) writeFileSync(paths.hooks, `${JSON.stringify(next, null, 2)}\n`);
     else rmSync(paths.hooks, { force: true });
     rmSync(paths.skillDir, { recursive: true, force: true });
+    rmSync(path.join(path.dirname(paths.skillDir), IMPORT_SKILL_NAME), { recursive: true, force: true });
     return `removed the ${MESHPOINT_GROUP} hook group from ${paths.hooks} and ${paths.skillDir}`;
   }
   mkdirSync(path.dirname(paths.hooks), { recursive: true });
   writeFileSync(paths.hooks, `${JSON.stringify(installAntigravityHooks(file), null, 2)}\n`);
   mkdirSync(paths.skillDir, { recursive: true });
   writeFileSync(path.join(paths.skillDir, "SKILL.md"), skillMarkdown({ allowedTools: false }));
+  const importDir = path.join(path.dirname(paths.skillDir), IMPORT_SKILL_NAME);
+  mkdirSync(importDir, { recursive: true });
+  writeFileSync(path.join(importDir, "SKILL.md"), importSkillMarkdown({ allowedTools: false }));
   return `installed the ${MESHPOINT_GROUP} hook group in ${paths.hooks} (${ANTIGRAVITY_EVENTS.join(", ")}) and ${paths.skillDir}/SKILL.md. Antigravity loads hooks.json on the next conversation; toggle it under Customizations > Hooks.`;
 }

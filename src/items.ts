@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { KINDS, MeshpointClient, type ItemInput, type Kind } from "@meshpoint/sdk";
 import type { Checkpoints } from "./checkpoints.js";
 import type { Config, RepoContext } from "./config.js";
+import { extractRefs, headSha } from "./refs.js";
+import type { Touched } from "./touched.js";
 
 export const ITEMS_MAX = 60;
 export const ID_PREFIX_CHARS = 8;
@@ -71,12 +73,56 @@ function clientFor(deps: ItemDeps): MeshpointClient {
   });
 }
 
-export async function putItems(drafts: ItemDraft[], deps: ItemDeps & { checkpoints: Checkpoints; now?: () => number }): Promise<{ count: number }> {
+export interface PutDeps extends ItemDeps {
+  checkpoints: Checkpoints;
+  // Files edited on the branch since the last checkpoint ride along as the items' paths.
+  touched?: Touched;
+  now?: () => number;
+  exists?: (abs: string) => boolean;
+  sha?: (root: string) => string;
+}
+
+// Each item gets its refs (paths named in its text that exist in the checkout), the paths edited
+// since the branch's last checkpoint, and HEAD. Path-like tokens that resolve to nothing come
+// back as `missing` so the writer can fix a typo.
+export async function putItems(drafts: ItemDraft[], deps: PutDeps): Promise<{ count: number; missing: string[] }> {
   const now = deps.now ?? Date.now;
-  const items: ItemInput[] = drafts.map((d) => ({ id: randomUUID(), ...d }));
+  const { project, branch, root } = deps.repo;
+  const since = deps.checkpoints.lastCheckpoint(project, branch);
+  const paths = deps.touched?.since(project, branch, since) ?? [];
+  const commit_sha = (deps.sha ?? headSha)(root);
+  const missing = new Set<string>();
+  const items: ItemInput[] = drafts.map((d) => {
+    const found = extractRefs(`${d.title}\n${d.body}`, root, deps.exists);
+    for (const m of found.missing) missing.add(m);
+    return { id: randomUUID(), ...d, refs: found.refs, paths, ...(commit_sha ? { commit_sha } : {}) };
+  });
   const out = await clientFor(deps).putItems(items);
-  deps.checkpoints.markCheckpoint(deps.repo.project, deps.repo.branch, now());
-  return out;
+  deps.checkpoints.markCheckpoint(project, branch, now());
+  deps.touched?.clear(project, branch);
+  return { ...out, missing: [...missing] };
+}
+
+// Resolves inject-style id prefixes against the branch's live items; ambiguous or unknown is an
+// error, never a guess.
+async function resolveIds(prefixes: readonly string[], deps: ItemDeps, client: MeshpointClient): Promise<string[]> {
+  const { items } = await client.recall({ budget: ALL_ITEMS_BUDGET, fresh: true });
+  return prefixes.map((prefix) => {
+    const matches = items.filter((i) => i.id.startsWith(prefix)).map((i) => i.id);
+    if (matches.length === 0) throw new Error(`no item on ${deps.repo.branch} starts with ${prefix}`);
+    if (matches.length > 1) throw new Error(`${prefix} matches ${matches.length} items; give more characters`);
+    return matches[0] as string;
+  });
+}
+
+export async function confirmItems(prefixes: readonly string[], deps: ItemDeps): Promise<{ confirmed: string[] }> {
+  if (prefixes.length === 0) throw new Error("confirm needs at least one item id");
+  const client = clientFor(deps);
+  const confirmed: string[] = [];
+  for (const id of await resolveIds(prefixes, deps, client)) {
+    if ((await client.confirm(id)).found) confirmed.push(id);
+  }
+  return { confirmed };
 }
 
 // The inject shows the first ID_PREFIX_CHARS of each id, so a retract takes a prefix and resolves it
@@ -84,15 +130,8 @@ export async function putItems(drafts: ItemDraft[], deps: ItemDeps & { checkpoin
 export async function retractItems(prefixes: readonly string[], deps: ItemDeps): Promise<{ retracted: string[] }> {
   if (prefixes.length === 0) throw new Error("retract needs at least one item id");
   const client = clientFor(deps);
-  const { items } = await client.recall({ budget: ALL_ITEMS_BUDGET, fresh: true });
-  const ids = prefixes.map((prefix) => {
-    const matches = items.filter((i) => i.id.startsWith(prefix)).map((i) => i.id);
-    if (matches.length === 0) throw new Error(`no item on ${deps.repo.branch} starts with ${prefix}`);
-    if (matches.length > 1) throw new Error(`${prefix} matches ${matches.length} items; give more characters`);
-    return matches[0] as string;
-  });
   const retracted: string[] = [];
-  for (const id of ids) {
+  for (const id of await resolveIds(prefixes, deps, client)) {
     if ((await client.retract(id)).found) retracted.push(id);
   }
   return { retracted };

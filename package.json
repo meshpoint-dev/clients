@@ -1,6 +1,6 @@
 {
   "name": "@meshpoint/cli",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Meshpoint CLI and harness adapters: shared agent memory for developer teams",
   "keywords": [
     "meshpoint",
@@ -38,7 +38,7 @@
     "prepublishOnly": "npm run check && npm run build"
   },
   "dependencies": {
-    "@meshpoint/sdk": "^1.0.0"
+    "@meshpoint/sdk": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

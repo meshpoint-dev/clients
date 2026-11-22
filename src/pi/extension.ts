@@ -43,6 +43,8 @@ export interface PiEvents {
   before_agent_start: [{ messageType: "user"; prompt: string } | { messageType: "custom" }, { message: PiCustomMessage } | undefined];
   turn_end: [{ message: PiMessage }, undefined];
   tool_call: [{ toolName: string; input: Record<string, unknown> }, undefined];
+  // The handler may return a partial patch of the result; `content` replaces the model-visible text.
+  tool_result: [{ toolName: string; input: Record<string, unknown>; content: PiContent[]; structuredContent?: unknown }, { content: PiContent[]; structuredContent?: unknown } | undefined];
   agent_before_settle: [{ outcome: "completed" | "aborted" | "error" }, PiBoundaryResult | undefined];
   session_before_compact: [{ reason: string }, undefined];
   session_compact: [{ reason: string }, void];
@@ -53,7 +55,7 @@ export interface PiApi {
   on<E extends keyof PiEvents>(event: E, handler: (event: PiEvents[E][0], ctx: PiContext) => PiEvents[E][1] | Promise<PiEvents[E][1]>): unknown;
 }
 
-export type TapLike = Pick<Tap, "start" | "user" | "assistant" | "nudge" | "end">;
+export type TapLike = Pick<Tap, "start" | "user" | "assistant" | "nudge" | "end" | "edit">;
 
 export interface PiExtensionDeps {
   open?: (session: string, cwd: string) => Promise<TapLike | null>;
@@ -141,6 +143,19 @@ export function meshpointExtension(pi: PiApi, deps: PiExtensionDeps = {}): void 
     if (tap && EDITING_TOOLS.has(event.toolName) && typeof p === "string" && p) paths.push(path.resolve(ctx.cwd, p));
     return undefined;
   });
+
+  // The file notice rides on the edit's result: pi lets a handler patch `content`, and a patch
+  // without `structuredContent` would drop it, so both go back.
+  pi.on("tool_result", (event, ctx) =>
+    quiet(async () => {
+      const p = event.input.path;
+      if (!tap || !EDITING_TOOLS.has(event.toolName) || typeof p !== "string" || !p) return undefined;
+      const notice = await tap.edit(path.resolve(ctx.cwd, p));
+      if (!notice) return undefined;
+      const content: PiContent[] = [...event.content, { type: "text", text: notice }];
+      return event.structuredContent === undefined ? { content } : { content, structuredContent: event.structuredContent };
+    }),
+  );
 
   pi.on("agent_before_settle", (event) =>
     quiet(async () => {

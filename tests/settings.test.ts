@@ -12,7 +12,9 @@ describe("claude code settings", () => {
       const managed = groups.flatMap((g) => g.hooks).filter((h) => h.command === TAP_COMMAND);
       expect(managed).toHaveLength(1);
       if (matcher) expect(groups.at(-1)?.matcher).toBe(matcher);
+      expect(managed[0]?.timeout).toBe(event === "PreToolUse" ? 5 : 30);
     }
+    expect(installed.hooks?.PreToolUse?.at(-1)?.matcher).toBe("Edit|Write|MultiEdit|NotebookEdit");
     expect(installed.hooks?.Stop?.[0]?.hooks).toEqual([user]);
     expect(installed.hooks?.SessionStart?.flatMap((g) => g.hooks).map((h) => h.command)).toEqual([TAP_COMMAND]);
     expect(installed.theme).toBe("dark");

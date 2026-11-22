@@ -53,6 +53,7 @@ describe("codex connect", () => {
       const handlers = hooks.hooks[event].flatMap((g: { hooks: unknown[] }) => g.hooks);
       expect(handlers).toEqual([{ type: "command", command: CODEX_TAP_COMMAND, timeout: 30, additionalContextLimit: 100_000 }]);
     }
+    expect(hooks.hooks.PreToolUse).toEqual([{ matcher: "Edit|Write", hooks: [{ type: "command", command: CODEX_TAP_COMMAND, timeout: 5, additionalContextLimit: 100_000 }] }]);
     expect(readFileSync(paths.rules, "utf8")).toContain('pattern = ["meshpoint", "items", "put"]');
     const skill = readFileSync(path.join(paths.skillDir, "SKILL.md"), "utf8");
     expect(skill).toContain("name: meshpoint");

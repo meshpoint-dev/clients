@@ -48,6 +48,10 @@ function fakeTap(over: Partial<TapLike> = {}): TapLike & { calls: string[]; entr
     end: vi.fn(async () => {
       calls.push("end");
     }),
+    edit: vi.fn(async (filePath: string) => {
+      calls.push(`edit:${filePath}`);
+      return filePath.endsWith("auth.ts") ? "Meshpoint, src/auth.ts:\n- [gotcha] careful: body" : "";
+    }),
     ...over,
   };
   return tap;
@@ -90,6 +94,15 @@ describe("pi extension", () => {
     expect(await pi.emit("agent_before_settle", { outcome: "completed" })).toBeUndefined();
     expect(tap.assistant).toHaveBeenCalledWith("Looking.\n\nDone.", ["/repo/sub/src/a.ts", "/repo/sub/src/b.ts"]);
     expect(tap.entries).toEqual([{ role: "assistant", text: "Looking.\n\nDone.", paths: ["/repo/sub/src/a.ts", "/repo/sub/src/b.ts"], at: 1000 }]);
+
+    // An edit's result carries the file notice, with structured content preserved; reads and quiet files do not.
+    expect(await pi.emit("tool_result", { toolName: "edit", input: { path: "src/auth.ts" }, content: [{ type: "text", text: "ok" }], structuredContent: { n: 1 } })).toEqual({
+      content: [{ type: "text", text: "ok" }, { type: "text", text: "Meshpoint, src/auth.ts:\n- [gotcha] careful: body" }],
+      structuredContent: { n: 1 },
+    });
+    expect(await pi.emit("tool_result", { toolName: "read", input: { path: "src/auth.ts" }, content: [] })).toBeUndefined();
+    expect(await pi.emit("tool_result", { toolName: "edit", input: { path: "src/quiet.ts" }, content: [] })).toBeUndefined();
+    expect(tap.edit).toHaveBeenCalledWith("/repo/sub/src/auth.ts");
 
     // The next run starts clean; a run with nothing to say spools nothing.
     expect(await pi.emit("agent_before_settle", { outcome: "completed" })).toBeUndefined();

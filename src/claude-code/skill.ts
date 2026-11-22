@@ -35,6 +35,8 @@ Each item is an object \`{"kind", "title", "body"}\`. \`kind\` is one of:
 - Only what this session established. Never invent.
 - Skip anything already listed under "Team knowledge" in the session-start context unless it changed; a changed decision or status gets a new item.
 - Retract items that this session made wrong or obsolete: a finished todo, a superseded status, a reversed decision. The first column of "Team knowledge" is the item id.
+- Items under "Possibly stale" name a file that is gone from this checkout. Check whether each still holds; retract it or write a corrected item. Do not leave them.
+- Name files by their repo-relative path (\`src/auth/token.ts\`, not "the token file"). Meshpoint links the item to those files, checks them in later checkouts, and shows the item when someone edits them. The command warns about paths it cannot find.
 - Prefer durable knowledge over moment-to-moment detail. Aim for 5 to 30 items; one \`status\` item at most.
 - No secrets, tokens, or credentials.
 
@@ -58,3 +60,49 @@ Then continue the work you were doing.
 `;
 
 export const SKILL_MD = skillMarkdown({ allowedTools: true });
+
+// The import skill: seeds a branch with no memory from the repository's committed instruction
+// files. Offered once per branch by the session-start inject.
+export const IMPORT_SKILL_NAME = "meshpoint-import";
+
+export function importSkillMarkdown(opts: { allowedTools: boolean }): string {
+  return `---
+name: ${IMPORT_SKILL_NAME}
+description: Seed Meshpoint team knowledge for a branch that has none from the repository's committed instruction files (CLAUDE.md, AGENTS.md, Cursor rules, Copilot instructions). Use when the Meshpoint session-start context says the branch has no team knowledge yet.
+${opts.allowedTools ? "allowed-tools: Bash(meshpoint items put:*), Bash(git ls-files:*)\n" : ""}---
+${IMPORT_SKILL_BODY}`;
+}
+
+const IMPORT_SKILL_BODY = `
+# Meshpoint import
+
+Turn the repository's instruction files into Meshpoint items, once.
+
+## Read
+
+The session-start context lists the files. Read each one. They are committed files such as \`CLAUDE.md\`, \`AGENTS.md\`, \`.cursor/rules/*\`, \`.github/copilot-instructions.md\`.
+
+## Select
+
+Keep only statements about this repository that a teammate's agent needs:
+
+- \`convention\`: how things are done here ("tests run with \`pnpm test\`", "migrations live in \`db/migrations\`").
+- \`fact\`: a stable truth about the code or environment ("CI pins Node 22").
+- \`gotcha\`: something that bites ("\`npm install\` fails without the private registry token").
+
+Skip instructions aimed at the model rather than the repository ("be concise", "ask before refactoring"), prose that only introduces a section, and anything already true of every project. One item per rule. At most 30 items. Name files by their repo-relative path.
+
+## Write
+
+One command, one \`--item kind title body\` per item. Single quotes; no single quote character inside (write "do not", not "don't").
+
+\`\`\`bash
+meshpoint items put \\
+  --item convention 'Tests run with pnpm test' 'package.json scripts.test runs vitest; CI runs the same command.' \\
+  --item fact 'CI pins Node 22' '.github/workflows/ci.yml uses actions/setup-node with node-version 22.'
+\`\`\`
+
+Then continue the work you were doing. Do not run this skill again on this branch.
+`;
+
+export const IMPORT_SKILL_MD = importSkillMarkdown({ allowedTools: true });

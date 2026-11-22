@@ -16,11 +16,14 @@ import { ReplyLog, runOpenclawTap, type OpenclawEvent } from "./openclaw/tap.js"
 import { connectPi } from "./pi/connect.js";
 import { Checkpoints } from "./checkpoints.js";
 import { configPath, deleteConfig, loadConfig, repoContext, saveConfig, spoolDir, stateDir, type Config } from "./config.js";
+import { SessionCache } from "./context.js";
+import { localChecks } from "./tap.js";
+import { Touched } from "./touched.js";
 import { MeshpointError } from "@meshpoint/sdk";
 import { api, ApiError, canOpenBrowser, deviceLogin, freshConfig, login } from "./control.js";
 import { detectHarnesses, renderDetected } from "./detect.js";
 import { renderDoctor, runDoctor } from "./doctor.js";
-import { parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
+import { confirmItems, parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
 import { Spool } from "./spool.js";
 
 const USAGE = `meshpoint <command>
@@ -69,6 +72,7 @@ const USAGE = `meshpoint <command>
                                            write items for the current repo and branch; the file or
                                            stdin form takes a JSON array of {kind, title, body}
   items retract <id>...                    retract items on the current branch; an id may be a prefix
+  items confirm <id>...                    confirm items on the current branch (counts toward their rank)
   tap claude-code | codex | cursor | antigravity [<event>] | openclaw
                                            hook entry point; reads one hook payload on stdin
 `;
@@ -220,7 +224,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "items": {
-      if (rest[0] !== "put" && rest[0] !== "retract") throw new Error("items supports: put, retract");
+      if (rest[0] !== "put" && rest[0] !== "retract" && rest[0] !== "confirm") throw new Error("items supports: put, retract, confirm");
       const config = await requireConfig();
       const repo = repoContext(process.cwd());
       if (!repo) throw new Error("not inside a git repo with an origin remote");
@@ -228,9 +232,14 @@ async function main(argv: string[]): Promise<number> {
         console.log(JSON.stringify(await withAuth(config, (c) => retractItems(rest.slice(1), { config: c, repo }))));
         return 0;
       }
+      if (rest[0] === "confirm") {
+        console.log(JSON.stringify(await withAuth(config, (c) => confirmItems(rest.slice(1), { config: c, repo }))));
+        return 0;
+      }
       const file = flag(rest, "--file");
       const drafts = rest.includes("--item") ? parseItemArgs(rest.slice(1)) : parseItems(file ? readFileSync(file, "utf8") : await readStdin());
-      const out = await withAuth(config, (c) => putItems(drafts, { config: c, repo, checkpoints: new Checkpoints(stateDir()) }));
+      const { missing, ...out } = await withAuth(config, (c) => putItems(drafts, { config: c, repo, checkpoints: new Checkpoints(stateDir()), touched: new Touched(stateDir()) }));
+      for (const m of missing) console.error(`ref not found: ${m}`);
       console.log(JSON.stringify({ ...out, project: repo.project, branch: repo.branch }));
       return 0;
     }
@@ -255,6 +264,9 @@ async function main(argv: string[]): Promise<number> {
         readTranscript: (file: string) => readFileSync(file, "utf8"),
         spool: new Spool(spoolDir()),
         checkpoints: new Checkpoints(stateDir()),
+        touched: new Touched(stateDir()),
+        cache: new SessionCache(stateDir()),
+        local: (root: string) => localChecks(root),
       });
       // Each harness has its own "do nothing" answer, needed even without a login.
       if (harness === "cursor") {

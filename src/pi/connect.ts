@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { skillMarkdown, SKILL_NAME } from "../claude-code/skill.js";
+import { IMPORT_SKILL_NAME, importSkillMarkdown, skillMarkdown, SKILL_NAME } from "../claude-code/skill.js";
 import type { Environment } from "../config.js";
 
 export interface PiPaths {
@@ -47,6 +47,7 @@ export function connectPi(opts: { remove: boolean; piDir?: string; paths?: PiPat
   if (opts.remove) {
     rmSync(paths.extension, { force: true });
     rmSync(paths.skillDir, { recursive: true, force: true });
+    rmSync(path.join(path.dirname(paths.skillDir), IMPORT_SKILL_NAME), { recursive: true, force: true });
     return `removed ${paths.extension} and ${paths.skillDir}`;
   }
   const source = opts.source ?? builtExtension();
@@ -55,5 +56,8 @@ export function connectPi(opts: { remove: boolean; piDir?: string; paths?: PiPat
   writeFileSync(paths.extension, extensionStub(source));
   mkdirSync(paths.skillDir, { recursive: true });
   writeFileSync(path.join(paths.skillDir, "SKILL.md"), skillMarkdown({ allowedTools: false }));
+  const importDir = path.join(path.dirname(paths.skillDir), IMPORT_SKILL_NAME);
+  mkdirSync(importDir, { recursive: true });
+  writeFileSync(path.join(importDir, "SKILL.md"), importSkillMarkdown({ allowedTools: false }));
   return `wrote ${paths.extension} (loads ${source}) and ${paths.skillDir}/SKILL.md. Restart pi (or /reload) to load it.`;
 }

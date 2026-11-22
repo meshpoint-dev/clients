@@ -33,6 +33,9 @@ function fakeFetch() {
       });
     }
     if (url.includes("/v1/presence")) return Response.json({ presence: [{ agent: "agent-2", user: "sam", branch: "master", paths: [], updated_at: clock }] });
+    if (url.includes("/v1/context")) {
+      return Response.json({ items: [], presence: url.includes("a.test.ts") ? [{ agent: "codex", user: "alice", branch: "feature", paths: ["tests/a.test.ts"], updated_at: clock }] : [] });
+    }
     return Response.json({ accepted: 1 }, { status: 202 });
   }) as unknown as typeof fetch;
 }
@@ -86,8 +89,12 @@ describe("opencode hooks", () => {
     const h = hooks();
     await h.event({ event: SESSION });
     await h["chat.message"]({ sessionID: "s1" }, { parts: [{ type: "text", text: "add tests" }, { type: "text", text: "hidden", synthetic: true }] });
-    await h["tool.execute.after"]({ tool: "edit", sessionID: "s1", args: { filePath: "/repo/tests/a.test.ts" } });
-    await h["tool.execute.after"]({ tool: "read", sessionID: "s1", args: { filePath: "/repo/src/x.ts" } });
+    const edited = { title: "edit", output: "Edited tests/a.test.ts", metadata: {} };
+    await h["tool.execute.after"]({ tool: "edit", sessionID: "s1", args: { filePath: "/repo/tests/a.test.ts" } }, edited);
+    expect(edited.output).toBe("Edited tests/a.test.ts\n\nMeshpoint, tests/a.test.ts:\n- alice's codex edited this file just now on feature.");
+    const read = { title: "read", output: "contents", metadata: {} };
+    await h["tool.execute.after"]({ tool: "read", sessionID: "s1", args: { filePath: "/repo/src/x.ts" } }, read);
+    expect(read.output).toBe("contents");
     await h["experimental.text.complete"]({ sessionID: "s1", messageID: "m1" }, { text: "Added." });
     expect(h.spool.read("s1").map((t) => [t.body, t.paths])).toEqual([
       ["[user] add tests", undefined],

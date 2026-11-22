@@ -10,6 +10,11 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+// File paths named in an apply_patch body ("*** Update File: src/x.ts").
+export function patchFilePaths(patch: string): string[] {
+  return [...patch.matchAll(PATCH_PATH_RE)].map((m) => (m[1] as string).trim()).filter(Boolean);
+}
+
 function patchPaths(args: unknown): string[] {
   if (typeof args !== "string") return [];
   let input: unknown;
@@ -20,7 +25,7 @@ function patchPaths(args: unknown): string[] {
   }
   const patch = isRecord(input) ? (input.patch ?? input.input) : undefined;
   if (typeof patch !== "string") return [];
-  return [...patch.matchAll(PATCH_PATH_RE)].map((m) => (m[1] as string).trim()).filter(Boolean);
+  return patchFilePaths(patch);
 }
 
 export function parseCodexTranscript(jsonl: string): TranscriptEntry[] {

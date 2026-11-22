@@ -97,6 +97,9 @@ export async function runAntigravityTap(payload: AntigravityHookPayload, deps: A
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
     ...(deps.presenceWaitMs !== undefined ? { presenceWaitMs: deps.presenceWaitMs } : {}),
     ...(deps.refresh ? { refresh: deps.refresh } : {}),
+    ...(deps.touched ? { touched: deps.touched } : {}),
+    ...(deps.cache ? { cache: deps.cache } : {}),
+    ...(deps.local ? { local: deps.local(repo.root) } : {}),
   });
   const conversations = new Conversations(deps.stateDir);
 

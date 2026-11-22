@@ -21,10 +21,22 @@ export interface ClaudeCodeSettings {
   readonly [key: string]: unknown;
 }
 
-// SessionStart includes "compact": the items are what survives a context loss.
-export const MANAGED_EVENTS: readonly { readonly event: string; readonly matcher?: string }[] = [
+export interface ManagedEvent {
+  readonly event: string;
+  readonly matcher?: string;
+  // Seconds the harness waits for the hook; the default suits network calls, edits get a short one.
+  readonly timeout?: number;
+}
+
+export const EDIT_TOOLS_MATCHER = "Edit|Write|MultiEdit|NotebookEdit";
+const EDIT_HOOK_TIMEOUT_S = 5;
+
+// SessionStart includes "compact": the items are what survives a context loss. PreToolUse on the
+// editing tools carries the file-level notice (items naming the file, teammates on it).
+export const MANAGED_EVENTS: readonly ManagedEvent[] = [
   { event: "SessionStart", matcher: "startup|resume|clear|compact" },
   { event: "UserPromptSubmit" },
+  { event: "PreToolUse", matcher: EDIT_TOOLS_MATCHER, timeout: EDIT_HOOK_TIMEOUT_S },
   { event: "Stop" },
   { event: "PreCompact" },
   { event: "SessionEnd" },
@@ -32,7 +44,7 @@ export const MANAGED_EVENTS: readonly { readonly event: string; readonly matcher
 
 export interface TapHookSpec {
   readonly command: string;
-  readonly events: readonly { readonly event: string; readonly matcher?: string }[];
+  readonly events: readonly ManagedEvent[];
   // Extra handler fields, such as Codex's additionalContextLimit.
   readonly extra?: Readonly<Record<string, unknown>>;
 }
@@ -51,10 +63,10 @@ function withoutManaged(groups: readonly HookGroup[] | undefined): HookGroup[] {
 
 export function installTapHooks(settings: ClaudeCodeSettings, spec: TapHookSpec = CLAUDE_CODE_SPEC): ClaudeCodeSettings {
   const hooks: Record<string, readonly HookGroup[]> = { ...settings.hooks };
-  for (const { event, matcher } of spec.events) {
+  for (const { event, matcher, timeout } of spec.events) {
     hooks[event] = [
       ...withoutManaged(hooks[event]),
-      { ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: "command", command: spec.command, timeout: HOOK_TIMEOUT_S, ...spec.extra }] },
+      { ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: "command", command: spec.command, timeout: timeout ?? HOOK_TIMEOUT_S, ...spec.extra }] },
     ];
   }
   return { ...settings, hooks };
