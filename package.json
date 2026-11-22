@@ -1,6 +1,6 @@
 {
   "name": "@meshpoint/cli",
-  "version": "1.0.0-rc.4",
+  "version": "1.0.0",
   "description": "Meshpoint CLI and harness adapters",
   "keywords": [
     "meshpoint",
@@ -10,7 +10,7 @@
     "cursor",
     "memory"
   ],
-  "license": "Apache-2.0",
+  "license": "MIT",
   "homepage": "https://meshpoint.dev",
   "repository": {
     "type": "git",

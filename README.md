@@ -5,8 +5,7 @@ The `meshpoint` CLI and harness adapters for Meshpoint 1.0. Adapters: Claude Cod
 ## Install
 
 ```
-npm i -g @meshpoint/cli@next         # 1.0.0-rc prereleases, until 1.0
-npm i -g @meshpoint/cli              # at 1.0
+npm i -g @meshpoint/cli
 ```
 
 ```
@@ -120,4 +119,4 @@ Publishing (maintainers, after `npm login`): `npm publish` in `../meshpoint-sdk`
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
