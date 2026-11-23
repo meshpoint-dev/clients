@@ -132,7 +132,7 @@ describe("import run", () => {
     };
     const state = path.join(home, "state");
     const base = { config: { baseUrl: "https://api.test", token: "tok", user: "u1" }, current: { project: "github.com--acme--web", root: "/work/web", defaultBranch: "master" }, sinceDays: 90, allRepos: false, withTurns: false, yes: false, minTurns: 1, runner, stateDir: state, home, env: { PATH: "" }, discover: (o: any) => discoverSessions({ ...o, projectOf }), now: () => Date.parse("2026-11-22T12:00:00Z"), fetch: fetchImpl, log: () => undefined, exists: (p: string) => p === "/work/web/package.json" };
-    const dry = await importSessions({ ...base, apply: false });
+    const dry = await importSessions({ ...base, apply: false, propose: false });
     expect(dry.cancelled).toBe(false);
     expect(dry.results).toHaveLength(1);
     expect(dry.unmapped.map((s) => s.id)).toEqual(["s-gone"]);
@@ -153,7 +153,7 @@ describe("import run", () => {
     expect(prompts.filter((p) => p.startsWith("You merge"))).toHaveLength(2);
 
     calls.length = 0;
-    const applied = await importSessions({ ...base, apply: true, withTurns: true });
+    const applied = await importSessions({ ...base, apply: true, propose: false, withTurns: true });
     const puts = calls.filter((c) => c.url.endsWith("/v1/items"));
     expect(puts.length).toBeGreaterThanOrEqual(1);
     const item = puts.find((c) => c.body.branch === "master")?.body.items[0];
@@ -176,7 +176,7 @@ describe("import run", () => {
     };
     const quiet = (async () => Response.json({ project: "p", branch: "master", checkpoint: null, items: [], generated_at: 1, source: "do" })) as unknown as typeof fetch;
     const base = { config: { baseUrl: "https://api.test", token: "tok", user: "u1" }, current: { project: "github.com--acme--web", root: "/work/web", defaultBranch: "master" }, sinceDays: 90, allRepos: false, withTurns: false, yes: false, minTurns: 1, runner, stateDir: path.join(home, "state"), home, env: { PATH: "" }, discover: (o: any) => discoverSessions({ ...o, projectOf }), now: () => Date.parse("2026-11-22T12:00:00Z"), fetch: quiet, log: () => undefined, exists: (p: string) => p === "/work/web/package.json" };
-    const dry = await importSessions({ ...base, apply: false });
+    const dry = await importSessions({ ...base, apply: false, propose: false });
     const file = dry.itemsFiles[0]!;
     const saved = readProposal(file);
     expect([...new Set(saved.flatMap((b) => b.items.map((i) => i.title)))].sort()).toEqual(["Delete me", "Keep me"]);
@@ -203,11 +203,31 @@ describe("import run", () => {
     expect(readFileSync(file, "utf8")).toBe("{}");
   });
 
+  it("sends the proposal to the platform with --propose and reports the review url", async () => {
+    seedStores();
+    const calls: Array<{ url: string; body: any }> = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : undefined });
+      if (url.includes("/v1/recall")) return Response.json({ project: "p", branch: "master", checkpoint: null, items: [], generated_at: 1, source: "do" });
+      if (url.endsWith("/v1/imports")) return Response.json({ id: "imp_abc123def456", url: "https://console.test/projects/github.com--acme--web/imports/imp_abc123def456" }, { status: 201 });
+      return Response.json({ count: 1, superseded: 0 }, { status: 202 });
+    }) as unknown as typeof fetch;
+    const runner: Runner = { name: "claude", run: async (p) => (p.startsWith("You merge") ? '[{"kind":"fact","title":"F","body":"b","sessions":["s-cc"]}]' : '[{"kind":"fact","title":"F","body":"b"}]') };
+    const out = await importSessions({ config: { baseUrl: "https://api.test", token: "tok", user: "u1" }, current: { project: "github.com--acme--web", root: "/work/web", defaultBranch: "master" }, sinceDays: 90, allRepos: false, withTurns: false, apply: false, propose: true, yes: false, minTurns: 1, runner, stateDir: path.join(home, "state"), home, env: { PATH: "" }, discover: (o: any) => discoverSessions({ ...o, projectOf }), now: () => Date.parse("2026-11-22T12:00:00Z"), fetch: fetchImpl, log: () => undefined, exists: () => false });
+    expect(out.proposals).toEqual([{ project: "github.com--acme--web", id: "imp_abc123def456", url: "https://console.test/projects/github.com--acme--web/imports/imp_abc123def456" }]);
+    const sent = calls.find((c) => c.url.endsWith("/v1/imports"))!;
+    expect(sent.body.project).toBe("github.com--acme--web");
+    expect(sent.body.branches.flatMap((b: any) => b.items).length).toBeGreaterThan(0);
+    expect(sent.body.report).toContain("== github.com--acme--web");
+    expect(calls.filter((c) => c.url.endsWith("/v1/items"))).toHaveLength(0);
+  });
+
   it("asks before going past 90 days or across repos, and stops on no", async () => {
     seedStores();
     const asked: string[] = [];
     const runner: Runner = { name: "claude", run: async () => "[]" };
-    const out = await importSessions({ config: { baseUrl: "https://api.test", token: "tok" }, current: null, sinceDays: 365, allRepos: true, withTurns: false, apply: false, yes: false, minTurns: 1, runner, stateDir: path.join(home, "state"), home, env: { PATH: "" }, discover: (o: any) => discoverSessions({ ...o, projectOf }), now: () => Date.parse("2026-11-22T12:00:00Z"), log: () => undefined, confirm: async (q) => (asked.push(q), false) });
+    const out = await importSessions({ config: { baseUrl: "https://api.test", token: "tok" }, current: null, sinceDays: 365, allRepos: true, withTurns: false, apply: false, propose: false, yes: false, minTurns: 1, runner, stateDir: path.join(home, "state"), home, env: { PATH: "" }, discover: (o: any) => discoverSessions({ ...o, projectOf }), now: () => Date.parse("2026-11-22T12:00:00Z"), log: () => undefined, confirm: async (q) => (asked.push(q), false) });
     expect(out.cancelled).toBe(true);
     expect(asked).toHaveLength(1);
   });

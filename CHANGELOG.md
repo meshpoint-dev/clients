@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0
+
+`import sessions --propose` sends the proposal to the platform and prints a console link; the review page shows every item per branch with checkboxes and editable fields, and the author or an admin applies it there. Nothing is written until then.
+
 ## 1.4.2
 
 `import sessions --apply --from <items.json>` uploads a reviewed proposal file exactly as edited (delete entries, fix titles or bodies, change kinds; refs are re-read from the text). The dry run now prints the review path and that command. Saved proposals carry each item's session date and source harnesses.

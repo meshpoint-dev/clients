@@ -1,6 +1,6 @@
 {
   "name": "@meshpoint/cli",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "Meshpoint CLI and harness adapters: shared agent memory for developer teams",
   "keywords": [
     "meshpoint",

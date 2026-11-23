@@ -75,7 +75,7 @@ const USAGE = `meshpoint <command>
                                            stdin form takes a JSON array of {kind, title, body}
   items retract <id>...                    retract items on the current branch; an id may be a prefix
   items confirm <id>...                    confirm items on the current branch (counts toward their rank)
-  import sessions [--since <days>] [--all-repos] [--with-turns] [--apply] [--yes]
+  import sessions [--since <days>] [--all-repos] [--with-turns] [--apply | --propose] [--yes]
                  [--runner claude|codex] [--model <m>] [--min-turns <n>] [--from <items.json>]
                                            read this machine's harness transcripts (Claude Code, Codex, pi,
                                            opencode, Antigravity, Cursor) for the current repo and the last
@@ -85,7 +85,8 @@ const USAGE = `meshpoint <command>
                                            --all-repos asks first (--yes skips). --with-turns also uploads
                                            the last 30 days of turns as sessions. Review the saved
                                            items.json, delete or edit entries, then upload exactly that
-                                           file with --apply --from <items.json>.
+                                           file with --apply --from <items.json>; or --propose sends the
+                                           proposal to the console, where it is reviewed and applied.
   tap claude-code | codex | cursor | antigravity [<event>] | openclaw
                                            hook entry point; reads one hook payload on stdin
 `;
@@ -283,6 +284,7 @@ async function main(argv: string[]): Promise<number> {
           allRepos: rest.includes("--all-repos"),
           withTurns: rest.includes("--with-turns"),
           apply: rest.includes("--apply"),
+          propose: rest.includes("--propose"),
           yes: rest.includes("--yes"),
           minTurns,
           runner,

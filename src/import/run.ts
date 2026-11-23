@@ -28,6 +28,8 @@ export interface ImportOptions {
   allRepos: boolean;
   withTurns: boolean;
   apply: boolean;
+  // Send the proposal to the platform for review in the console instead of writing items.
+  propose: boolean;
   yes: boolean;
   minTurns: number;
   runner: Runner;
@@ -55,6 +57,8 @@ export interface ImportOutcome {
   reportFile: string;
   itemsFiles: string[];
   uploaded: { items: number; turns: number };
+  // Console review links, one per project, when --propose was used.
+  proposals: Array<{ project: string; id: string; url: string }>;
   cancelled: boolean;
 }
 
@@ -99,7 +103,7 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
     if (!opts.current) throw new Error("not inside a git repo with an origin remote; pass --all-repos to import every repository");
     selected = selected.filter((s) => s.project === opts.current!.project);
   }
-  const empty: ImportOutcome = { results: [], unmapped, reportFile: "", itemsFiles: [], uploaded: { items: 0, turns: 0 }, cancelled: false };
+  const empty: ImportOutcome = { results: [], unmapped, reportFile: "", itemsFiles: [], uploaded: { items: 0, turns: 0 }, proposals: [], cancelled: false };
   if (selected.length === 0) {
     log(`no sessions found${opts.allRepos ? "" : ` for ${opts.current?.project}`} in the last ${opts.sinceDays} days (${inWindow.length} in the window, ${unmapped.length} unmapped)`);
     return empty;
@@ -123,6 +127,7 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
   const results: ProjectResult[] = [];
   const itemsFiles: string[] = [];
   const uploaded = { items: 0, turns: 0 };
+  const sent: ImportOutcome["proposals"] = [];
   const outDir = path.join(opts.stateDir, "import");
   mkdirSync(outDir, { recursive: true, mode: 0o700 });
 
@@ -184,6 +189,22 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
     writeFileSync(file, `${JSON.stringify(saved, null, 2)}\n`, { mode: 0o600 });
     itemsFiles.push(file);
 
+    if (opts.propose) {
+      try {
+        const res = await (opts.fetch ?? fetch)(`${opts.config.baseUrl.replace(/\/+$/, "")}/v1/imports`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${opts.config.token}`, "content-type": "application/json" },
+          body: JSON.stringify({ project, branches: saved, report: renderReport([result], [], {}).slice(0, 60_000), commit_sha: root ? headSha(root) : "" }),
+        });
+        const data = (await res.json()) as { id?: string; url?: string; error?: string };
+        if (!res.ok || !data.id) throw new Error(data.error ?? `HTTP ${res.status}`);
+        sent.push({ project, id: data.id, url: data.url ?? "" });
+        log(`  proposal ${data.id} sent for review${data.url ? `: ${data.url}` : ""}`);
+      } catch (err) {
+        result.errors.push(`proposal upload failed (${err instanceof Error ? err.message : String(err)})`);
+      }
+    }
+
     if (opts.apply) {
       const out = await uploadProposal({ project, root, branches: saved, config: opts.config, runnerName: opts.runner.name, ...(opts.fetch ? { fetch: opts.fetch } : {}), ...(opts.exists ? { exists: opts.exists } : {}), log });
       uploaded.items += out.items;
@@ -208,12 +229,10 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
   log("");
   log(report);
   log("");
-  log(
-    opts.apply
-      ? `uploaded ${uploaded.items} items${opts.withTurns ? ` and ${uploaded.turns} turns` : ""}; proposals saved in ${outDir}`
-      : `dry run, nothing uploaded. Review the proposal: ${itemsFiles.join(", ")}\nDelete or edit entries there, then upload exactly that file with: meshpoint import sessions --apply --from <file>\nOr run again with --apply to distill afresh and upload.`,
-  );
-  return { results, unmapped, reportFile, itemsFiles, uploaded, cancelled: false };
+  if (opts.apply) log(`uploaded ${uploaded.items} items${opts.withTurns ? ` and ${uploaded.turns} turns` : ""}; proposals saved in ${outDir}`);
+  else if (opts.propose) log(`sent for review in the console${sent.length ? `: ${sent.map((p) => p.url || p.id).join(", ")}` : ""}. Nothing is written until someone applies it there.`);
+  else log(`dry run, nothing uploaded. Review the proposal: ${itemsFiles.join(", ")}\nDelete or edit entries there, then upload exactly that file with: meshpoint import sessions --apply --from <file>\nOr send it to the console for review with --propose, or run again with --apply to distill afresh and upload.`);
+  return { results, unmapped, reportFile, itemsFiles, uploaded, proposals: sent, cancelled: false };
 }
 
 interface UploadInput {
