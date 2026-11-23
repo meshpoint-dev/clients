@@ -24,9 +24,29 @@ import { api, ApiError, canOpenBrowser, deviceLogin, freshConfig, login } from "
 import { detectHarnesses, renderDetected } from "./detect.js";
 import { renderDoctor, runDoctor } from "./doctor.js";
 import { confirmItems, parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
+import { importOffer } from "./import/offer.js";
 import { applyProposalFile, DEFAULT_SINCE_DAYS, importSessions } from "./import/run.js";
 import { detectRunner, type RunnerName } from "./import/runner.js";
 import { Spool } from "./spool.js";
+
+const IMPORT_USAGE = `  import sessions [--since <days>] [--all-repos] [--with-turns] [--apply | --propose] [--yes] [--fresh]
+                 [--runner claude|codex] [--model <m>] [--min-turns <n>] [--from <items.json>] [--help]
+                                           read this machine's harness transcripts (Claude Code, Codex, pi,
+                                           opencode, Antigravity, Cursor) for the current repo and the last
+                                           90 days, distill them into items with your own agent CLI, and
+                                           write a proposal + report under ~/.local/state/meshpoint/import/.
+                                           Every item carries a verbatim transcript quote as evidence;
+                                           items without one are dropped. Per-session results are cached
+                                           there too, so a rerun only distills new or changed sessions
+                                           (--fresh ignores the cache). Items from a branch that is gone or
+                                           already merged land on the current branch.
+                                           Nothing is uploaded without --apply; older than 90 days or
+                                           --all-repos asks first (--yes skips). --with-turns also uploads
+                                           the last 30 days of turns as sessions. Review the saved
+                                           items.json, delete or edit entries, then upload exactly that
+                                           file with --apply --from <items.json>; or --propose sends the
+                                           proposal to the console, where it is reviewed and applied.
+`;
 
 const USAGE = `meshpoint <command>
 
@@ -75,21 +95,10 @@ const USAGE = `meshpoint <command>
                                            stdin form takes a JSON array of {kind, title, body}
   items retract <id>...                    retract items on the current branch; an id may be a prefix
   items confirm <id>...                    confirm items on the current branch (counts toward their rank)
-  import sessions [--since <days>] [--all-repos] [--with-turns] [--apply | --propose] [--yes]
-                 [--runner claude|codex] [--model <m>] [--min-turns <n>] [--from <items.json>]
-                                           read this machine's harness transcripts (Claude Code, Codex, pi,
-                                           opencode, Antigravity, Cursor) for the current repo and the last
-                                           90 days, distill them into items with your own agent CLI, and
-                                           write a proposal + report under ~/.local/state/meshpoint/import/.
-                                           Nothing is uploaded without --apply; older than 90 days or
-                                           --all-repos asks first (--yes skips). --with-turns also uploads
-                                           the last 30 days of turns as sessions. Review the saved
-                                           items.json, delete or edit entries, then upload exactly that
-                                           file with --apply --from <items.json>; or --propose sends the
-                                           proposal to the console, where it is reviewed and applied.
-  tap claude-code | codex | cursor | antigravity [<event>] | openclaw
+${IMPORT_USAGE}  tap claude-code | codex | cursor | antigravity [<event>] | openclaw
                                            hook entry point; reads one hook payload on stdin
 `;
+
 
 const TAP_HARNESSES = new Set(["claude-code", "codex", "cursor", "antigravity", "openclaw"]);
 
@@ -235,6 +244,15 @@ async function main(argv: string[]): Promise<number> {
       else if (rest[0] === "openclaw") console.log(connectOpenclaw({ remove }));
       else if (rest[0] === "opencode") console.log(connectOpencode({ remove, ...(configDir ? { configDir } : {}) }));
       else throw new Error("connect supports: claude-code, codex, cursor, antigravity, pi, opencode, openclaw");
+      if (!remove) {
+        // Past sessions for this repository are worth a line; the offer never fails the connect.
+        try {
+          const offer = importOffer({ repo: repoContext(process.cwd()), env: process.env, runner: detectRunner(process.env)?.name ?? null });
+          if (offer) console.log(`\n${offer}`);
+        } catch {
+          // unreadable store or no git
+        }
+      }
       return 0;
     }
     case "items": {
@@ -259,6 +277,10 @@ async function main(argv: string[]): Promise<number> {
     }
     case "import": {
       if (rest[0] !== "sessions") throw new Error("import supports: sessions");
+      if (rest.includes("--help") || rest.includes("-h")) {
+        process.stdout.write(IMPORT_USAGE);
+        return 0;
+      }
       const config = await requireConfig();
       const repo = repoContext(process.cwd());
       const from = flag(rest, "--from");
@@ -286,6 +308,7 @@ async function main(argv: string[]): Promise<number> {
           apply: rest.includes("--apply"),
           propose: rest.includes("--propose"),
           yes: rest.includes("--yes"),
+          fresh: rest.includes("--fresh"),
           minTurns,
           runner,
           stateDir: stateDir(),

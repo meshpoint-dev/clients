@@ -1,5 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { MeshpointClient, type Item, type ItemInput } from "@meshpoint/sdk";
@@ -31,6 +32,8 @@ export interface ImportOptions {
   // Send the proposal to the platform for review in the console instead of writing items.
   propose: boolean;
   yes: boolean;
+  // Distill every session again instead of reusing cached per-session proposals.
+  fresh?: boolean;
   minTurns: number;
   runner: Runner;
   stateDir: string;
@@ -42,6 +45,44 @@ export interface ImportOptions {
   confirm?: (question: string) => Promise<boolean>;
   log?: (line: string) => void;
   exists?: (abs: string) => boolean;
+  // Whether a recorded branch still carries work of its own; the default asks git.
+  branchState?: (root: string, branch: string, defaultBranch: string) => BranchState;
+}
+
+// "gone": no local or remote ref; "merged": already in the default branch; "live": still its own.
+export type BranchState = "gone" | "merged" | "live";
+
+export function gitBranchState(root: string, branch: string, defaultBranch: string): BranchState {
+  const ok = (args: string[]) => spawnSync("git", ["-C", root, ...args], { stdio: "ignore", timeout: 2000 }).status === 0;
+  const local = ok(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+  const remote = !local && ok(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]);
+  if (!local && !remote) return "gone";
+  return ok(["merge-base", "--is-ancestor", local ? branch : `origin/${branch}`, defaultBranch]) ? "merged" : "live";
+}
+
+// Per-session proposals survive between runs: a session whose file has not changed is not distilled again.
+interface CacheEntry {
+  mtime: number;
+  size: number;
+  items: ProposedItem[];
+}
+
+function fileStamp(file: string): { mtime: number; size: number } | null {
+  try {
+    const st = statSync(file);
+    return { mtime: st.mtimeMs, size: st.size };
+  } catch {
+    return null;
+  }
+}
+
+function readCache(file: string, stamp: { mtime: number; size: number }): ProposedItem[] | null {
+  try {
+    const c = JSON.parse(readFileSync(file, "utf8")) as CacheEntry;
+    return c.mtime === stamp.mtime && c.size === stamp.size && Array.isArray(c.items) ? c.items : null;
+  } catch {
+    return null;
+  }
 }
 
 // One branch of a saved proposal, the file a user edits between the dry run and --apply --from.
@@ -95,14 +136,18 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
   const discover = opts.discover ?? discoverSessions;
   const since = now() - opts.sinceDays * 86_400_000;
 
-  const all = discover({ ...(opts.env ? { env: opts.env } : {}), ...(opts.home ? { home: opts.home } : {}) });
-  const inWindow = all.filter((s) => s.endedAt >= since && s.entries.length >= opts.minTurns);
+  if (!opts.allRepos && !opts.current) throw new Error("not inside a git repo with an origin remote; pass --all-repos to import every repository");
+  // Outside --all-repos only this repository's transcripts are read in full; the rest is skimmed or skipped.
+  const all = discover({
+    ...(opts.env ? { env: opts.env } : {}),
+    ...(opts.home ? { home: opts.home } : {}),
+    since,
+    ...(opts.allRepos || !opts.current ? {} : { project: opts.current.project, roots: [opts.current.root] }),
+  });
+  const inWindow = all.filter((s) => s.endedAt >= since && (s.skimmed || s.entries.length >= opts.minTurns));
   const unmapped = inWindow.filter((s) => s.project === null);
-  let selected = inWindow.filter((s) => s.project !== null);
-  if (!opts.allRepos) {
-    if (!opts.current) throw new Error("not inside a git repo with an origin remote; pass --all-repos to import every repository");
-    selected = selected.filter((s) => s.project === opts.current!.project);
-  }
+  let selected = inWindow.filter((s) => s.project !== null && !s.skimmed);
+  if (!opts.allRepos) selected = selected.filter((s) => s.project === opts.current!.project);
   const empty: ImportOutcome = { results: [], unmapped, reportFile: "", itemsFiles: [], uploaded: { items: 0, turns: 0 }, proposals: [], cancelled: false };
   if (selected.length === 0) {
     log(`no sessions found${opts.allRepos ? "" : ` for ${opts.current?.project}`} in the last ${opts.sinceDays} days (${inWindow.length} in the window, ${unmapped.length} unmapped)`);
@@ -129,17 +174,27 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
   const uploaded = { items: 0, turns: 0 };
   const sent: ImportOutcome["proposals"] = [];
   const outDir = path.join(opts.stateDir, "import");
-  mkdirSync(outDir, { recursive: true, mode: 0o700 });
+  const cacheDir = path.join(outDir, "cache");
+  mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
+  const branchState = opts.branchState ?? gitBranchState;
 
   for (const [project, sessions] of byProject) {
     const root = opts.current?.project === project ? opts.current.root : (sessions.find((s) => s.cwd && existsSync(s.cwd))?.cwd ?? "");
     const defaultBranch = opts.current?.project === project ? opts.current.defaultBranch : "master";
-    const result: ProjectResult = { project, root, sessions, branches: [], errors: [] };
+    const result: ProjectResult = { project, root, sessions, branches: [], folded: [], errors: [] };
     log(`${project}: distilling ${sessions.length} session${sessions.length === 1 ? "" : "s"} with ${opts.runner.name}`);
     const proposals = await mapPool(sessions, DISTILL_CONCURRENCY, async (s) => {
+      const stamp = fileStamp(s.file);
+      const cacheFile = path.join(cacheDir, `${safe(s.harness)}-${safe(s.id)}.json`);
+      const cached = stamp && !opts.fresh ? readCache(cacheFile, stamp) : null;
+      if (cached) {
+        log(`  ${s.harness} ${s.id.slice(0, 8)} (${s.entries.length} turns): ${cached.length} proposed (cached)`);
+        return { s, items: cached };
+      }
       try {
-        const items = await distillSession(opts.runner, s);
-        log(`  ${s.harness} ${s.id.slice(0, 8)} (${s.entries.length} turns): ${items.length} proposed`);
+        const { items, unsupported } = await distillSession(opts.runner, s);
+        log(`  ${s.harness} ${s.id.slice(0, 8)} (${s.entries.length} turns): ${items.length} proposed${unsupported ? `, ${unsupported} unsupported` : ""}`);
+        if (stamp) writeFileSync(cacheFile, JSON.stringify({ ...stamp, items } satisfies CacheEntry), { mode: 0o600 });
         return { s, items };
       } catch (err) {
         result.errors.push(`${s.harness} ${s.id.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`);
@@ -148,9 +203,21 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
     });
     // Oldest first, so the consolidation pass can treat later sessions as newer.
     proposals.sort((a, b) => a.s.endedAt - b.s.endedAt);
+    // A branch that is gone or already merged gets no items of its own: they go to the default branch.
+    const placement = new Map<string, string>();
+    const place = (recorded: string): string => {
+      if (recorded === defaultBranch || !root) return recorded;
+      const known = placement.get(recorded);
+      if (known) return known;
+      const state = branchState(root, recorded, defaultBranch);
+      const target = state === "live" ? recorded : defaultBranch;
+      if (state !== "live") result.folded.push({ branch: recorded, into: defaultBranch, why: state });
+      placement.set(recorded, target);
+      return target;
+    };
     const byBranch = new Map<string, ProposedItem[]>();
     for (const p of proposals) {
-      const branch = p.s.branch ?? defaultBranch;
+      const branch = place(p.s.branch ?? defaultBranch);
       byBranch.set(branch, [...(byBranch.get(branch) ?? []), ...p.items]);
     }
     const client = (branch: string) => new MeshpointClient({ baseUrl: opts.config.baseUrl, token: opts.config.token, project, branch, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
@@ -223,6 +290,7 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
     results.push(result);
   }
 
+  for (const r of results) if (r.folded.length) log(`  ${r.project}: folded into ${r.folded[0]?.into}: ${r.folded.map((f) => `${f.branch} (${f.why})`).join(", ")}`);
   const report = renderReport(results, unmapped, { openclaw: "keeps no transcript on disk; nothing to import", cursor: "transcript store is undocumented; only files named like transcripts under ~/.cursor are tried" });
   const reportFile = path.join(outDir, `report-${new Date(now()).toISOString().slice(0, 10)}.txt`);
   writeFileSync(reportFile, `${report}\n`, { mode: 0o600 });
@@ -311,6 +379,7 @@ export function readProposal(file: string): SavedBranch[] {
         refs: Array.isArray(i.refs) ? i.refs.filter((x): x is string => typeof x === "string") : [],
         ...(typeof i.key === "string" && i.key ? { key: i.key } : {}),
         ...(i.recurring === true ? { recurring: true } : {}),
+        ...(typeof i.evidence === "string" && i.evidence.trim() ? { evidence: i.evidence.trim() } : {}),
         ...(Array.isArray(i.supersedes) ? { supersedes: i.supersedes.filter((x): x is string => typeof x === "string") } : {}),
         ...(typeof i.created_at === "number" ? { created_at: i.created_at } : {}),
         ...(Array.isArray(i.harnesses) ? { harnesses: i.harnesses.filter((x): x is string => typeof x === "string") } : {}),

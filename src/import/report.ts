@@ -14,6 +14,8 @@ export interface ProjectResult {
   root: string;
   sessions: DiscoveredSession[];
   branches: BranchResult[];
+  // Recorded branches whose proposals went to the default branch instead, and why.
+  folded: Array<{ branch: string; into: string; why: "merged" | "gone" }>;
   errors: string[];
 }
 
@@ -38,6 +40,7 @@ export function renderReport(results: readonly ProjectResult[], unmapped: readon
     lines.push(`== ${r.project}`, `${plural(r.sessions.length, "session")} (${[...byHarness].map(([h, n]) => `${h} ${n}`).join(", ")}), ${plural(turns, "turn")}, ${new Date(first).toISOString().slice(0, 10)} to ${new Date(last).toISOString().slice(0, 10)}`);
     const paths = topPaths(r.sessions);
     if (paths.length) lines.push(`most touched: ${paths.join(", ")}`);
+    if (r.folded.length) lines.push(`folded into ${r.folded[0]?.into}: ${r.folded.map((f) => `${f.branch} (${f.why})`).join(", ")}`);
     for (const b of r.branches) {
       const kinds = new Map<string, number>();
       for (const i of b.items) kinds.set(i.kind, (kinds.get(i.kind) ?? 0) + 1);
