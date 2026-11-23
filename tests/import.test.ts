@@ -96,9 +96,9 @@ describe("distill", () => {
     expect(parseProposed("not json", "sess")).toEqual([]);
     const prompt = consolidatePrompt([{ kind: "fact", title: "t", body: "b", sessions: ["a"] }], [{ id: "live1", kind: "fact", title: "old", body: "x" }]);
     expect(prompt).toContain('"id":"live1"');
-    const merged = parseMerged('[{"kind":"convention","title":"Tests","body":"npm test","key":"test-runner","recurring":true,"supersedes":["live1"],"sessions":["a","b"]}]', []);
+    const merged = parseMerged('[{"kind":"convention","title":"Tests","body":"npm test","key":"test-runner","recurring":true,"supersedes":["live1"],"sessions":["a","b"]},{"kind":"status","title":"wip","body":"x","sessions":["a"]}]', []);
     expect(merged).toEqual([{ kind: "convention", title: "Tests", body: "npm test", key: "test-runner", recurring: true, supersedes: ["live1"], sessions: ["a", "b"] }]);
-    expect(parseMerged("garbage", [{ kind: "fact", title: "t", body: "b", sessions: ["a"] }])).toHaveLength(1);
+    expect(parseMerged("garbage", [{ kind: "fact", title: "t", body: "b", sessions: ["a"] }, { kind: "status", title: "s", body: "b", sessions: ["a"] }])).toHaveLength(1);
     expect(jsonBlock("Here you go:\n[1,2]")).toEqual([1, 2]);
   });
 
@@ -156,7 +156,7 @@ describe("import run", () => {
     const puts = calls.filter((c) => c.url.endsWith("/v1/items"));
     expect(puts.length).toBeGreaterThanOrEqual(1);
     const item = puts.find((c) => c.body.branch === "master")?.body.items[0];
-    expect(item).toMatchObject({ kind: "gotcha", refs: ["package.json"], supersedes: ["live-1"] });
+    expect(item).toMatchObject({ kind: "gotcha", refs: ["package.json"], supersedes: ["live-1"], created_at: Date.parse("2026-11-20T10:01:00Z") });
     expect(JSON.parse(item.provenance)).toMatchObject({ agent: expect.stringMatching(/^import:/), user: "u1" });
     expect(applied.uploaded.items).toBeGreaterThan(0);
     const captures = calls.filter((c) => c.url.endsWith("/v1/capture"));

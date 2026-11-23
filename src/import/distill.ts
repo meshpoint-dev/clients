@@ -85,7 +85,7 @@ export function consolidatePrompt(items: readonly ProposedItem[], live: readonly
     "- When a fact or decision changed across sessions, keep only the newest statement (later session ids are newer in the list).",
     "- Give conventions a short stable \"key\" (letters, digits, . _ : / -) such as test-runner or deploy-target.",
     "- Mark a gotcha \"recurring\": true when the same problem appears in two or more sessions.",
-    "- Drop status items and todos that read as finished; keep at most one status.",
+    "- Drop every status item (they describe a past moment) and todos that read as finished.",
     "- Items already live on the branch are listed; do not repeat them, and when a proposed item supersedes a live one, add \"supersedes\": [\"<live id>\"].",
     `- Output only a JSON array of at most ${BRANCH_ITEMS_MAX} items: {"kind","title","body","key"?,"recurring"?,"supersedes"?,"sessions"}.`,
     "",
@@ -99,17 +99,21 @@ export interface MergedItem extends ProposedItem {
   supersedes?: string[];
 }
 
+// A status describes a past moment; an import never writes one, since a new status supersedes the
+// branch's current one on write.
+const IMPORT_KINDS: readonly string[] = KINDS.filter((k) => k !== "status");
+
 export function parseMerged(raw: string, fallback: readonly ProposedItem[]): MergedItem[] {
   let parsed: unknown;
   try {
     parsed = jsonBlock(raw);
   } catch {
-    return [...fallback];
+    return fallback.filter((i) => i.kind !== "status");
   }
-  if (!Array.isArray(parsed)) return [...fallback];
+  if (!Array.isArray(parsed)) return fallback.filter((i) => i.kind !== "status");
   const out: MergedItem[] = [];
   for (const v of parsed) {
-    if (!isRecord(v) || typeof v.kind !== "string" || !(KINDS as readonly string[]).includes(v.kind)) continue;
+    if (!isRecord(v) || typeof v.kind !== "string" || !IMPORT_KINDS.includes(v.kind)) continue;
     if (typeof v.title !== "string" || !v.title.trim() || typeof v.body !== "string" || !v.body.trim()) continue;
     const item: MergedItem = {
       kind: v.kind as Kind,

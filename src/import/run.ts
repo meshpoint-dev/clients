@@ -171,11 +171,15 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
       const sha = root ? headSha(root) : "";
       for (const b of result.branches) {
         if (b.items.length === 0) continue;
+        // Items are dated by the newest session that produced them, so ranking and decay see the
+        // real age rather than the import time.
+        const endedAt = (ids: readonly string[]) => Math.max(0, ...sessions.filter((s) => ids.includes(s.id)).map((s) => s.endedAt));
         const inputs: ItemInput[] = b.items.map((i) => ({
           id: randomUUID(),
           kind: i.kind,
           title: i.title,
           body: i.body,
+          ...(endedAt(i.sessions) > 0 ? { created_at: endedAt(i.sessions) } : {}),
           refs: i.refs,
           paths: [],
           ...(sha ? { commit_sha: sha } : {}),

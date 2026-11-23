@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1
+
+Imports never write `status` items (a new status would supersede the branch's current one), and imported items carry the time of the newest session that produced them, so ranking and decay see their real age.
+
 ## 1.4.0
 
 `meshpoint import sessions`: backfill a repository's memory from the harness transcripts already on the machine. Reads Claude Code, Codex, pi, opencode and Antigravity stores (Cursor best effort; OpenClaw keeps none), maps each session to a project by its recorded directory's origin remote, distills every session into items with your own agent CLI (`claude -p` or `codex exec`, no platform model), merges per branch (keys for conventions, recurring gotchas marked, supersedes against live items), drops items naming files the checkout no longer has, and writes a proposal plus a report under `~/.local/state/meshpoint/import/`. Dry run by default; `--apply` uploads with `import:<harness>` provenance; `--with-turns` also uploads the last 30 days of turns as sessions. Defaults to the current repository and 90 days; `--since` beyond that or `--all-repos` asks first (`--yes` skips).
