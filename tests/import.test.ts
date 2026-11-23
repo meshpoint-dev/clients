@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { discoverSessions } from "../src/import/discover.js";
 import { consolidatePrompt, parseMerged, parseProposed, prune, renderTranscript, sessionPrompt, HEAD_CHARS, TAIL_CHARS } from "../src/import/distill.js";
 import { renderReport } from "../src/import/report.js";
-import { importSessions } from "../src/import/run.js";
+import { applyProposalFile, importSessions, readProposal } from "../src/import/run.js";
+import { readFileSync } from "node:fs";
 import { jsonBlock, type Runner } from "../src/import/runner.js";
 
 let home: string;
@@ -162,6 +163,44 @@ describe("import run", () => {
     const captures = calls.filter((c) => c.url.endsWith("/v1/capture"));
     expect(captures.map((c) => c.body.session).sort()).toEqual(["s-ag", "s-cc", "s-codex", "s-pi", "ses_1"]);
     expect(captures.find((c) => c.body.session === "s-cc")?.body.branch).toBe("feature/x");
+  });
+
+  it("uploads an edited proposal file exactly as reviewed with --apply --from", async () => {
+    seedStores();
+    const runner: Runner = {
+      name: "claude",
+      async run(prompt) {
+        if (prompt.startsWith("You merge")) return '[{"kind":"gotcha","title":"Keep me","body":"see package.json","sessions":["s-cc"]},{"kind":"fact","title":"Delete me","body":"x","sessions":["s-cc"]}]';
+        return '[{"kind":"gotcha","title":"Keep me","body":"see package.json"}]';
+      },
+    };
+    const quiet = (async () => Response.json({ project: "p", branch: "master", checkpoint: null, items: [], generated_at: 1, source: "do" })) as unknown as typeof fetch;
+    const base = { config: { baseUrl: "https://api.test", token: "tok", user: "u1" }, current: { project: "github.com--acme--web", root: "/work/web", defaultBranch: "master" }, sinceDays: 90, allRepos: false, withTurns: false, yes: false, minTurns: 1, runner, stateDir: path.join(home, "state"), home, env: { PATH: "" }, discover: (o: any) => discoverSessions({ ...o, projectOf }), now: () => Date.parse("2026-11-22T12:00:00Z"), fetch: quiet, log: () => undefined, exists: (p: string) => p === "/work/web/package.json" };
+    const dry = await importSessions({ ...base, apply: false });
+    const file = dry.itemsFiles[0]!;
+    const saved = readProposal(file);
+    expect([...new Set(saved.flatMap((b) => b.items.map((i) => i.title)))].sort()).toEqual(["Delete me", "Keep me"]);
+    expect(saved[0]?.items[0]?.created_at).toBeGreaterThan(0);
+    expect(saved[0]?.items[0]?.harnesses).toEqual(["claude-code"]);
+    // The user deletes one entry and edits another's title.
+    const edited = saved.map((b) => ({ ...b, items: b.items.filter((i) => i.title !== "Delete me").map((i) => ({ ...i, title: "Kept and renamed" })) }));
+    writeFileSync(file, JSON.stringify(edited));
+    const calls: Array<{ url: string; body: any }> = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), body: init?.body ? JSON.parse(init.body as string) : undefined });
+      return Response.json({ count: 1, superseded: 0 }, { status: 202 });
+    }) as unknown as typeof fetch;
+    const out = await applyProposalFile({ config: base.config, file, current: base.current, fetch: fetchImpl, exists: base.exists, log: () => undefined });
+    expect(out.items).toBe(saved.length);
+    const put = calls.find((c) => c.url.endsWith("/v1/items"))!;
+    expect(put.body.items.map((i: { title: string }) => i.title)).toEqual(["Kept and renamed"]);
+    expect(put.body.items[0]).toMatchObject({ kind: "gotcha", refs: ["package.json"], created_at: Date.parse("2026-11-20T10:01:00Z") });
+    expect(JSON.parse(put.body.items[0].provenance).agent).toBe("import:claude-code");
+    writeFileSync(file, JSON.stringify([{ branch: "master", items: [{ kind: "status", title: "no", body: "x" }] }]));
+    expect(() => readProposal(file)).toThrow(/kind must be one of/);
+    writeFileSync(file, "{}");
+    expect(() => readProposal(file)).toThrow(/expected an array/);
+    expect(readFileSync(file, "utf8")).toBe("{}");
   });
 
   it("asks before going past 90 days or across repos, and stops on no", async () => {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { MeshpointClient, type Item, type ItemInput } from "@meshpoint/sdk";
@@ -7,6 +7,7 @@ import type { Config, Environment } from "../config.js";
 import { headSha } from "../refs.js";
 import { discoverSessions, type DiscoveredSession, type DiscoverOptions } from "./discover.js";
 import { consolidate, distillSession, prune, type MergedItem, type ProposedItem } from "./distill.js";
+import { KINDS } from "@meshpoint/sdk";
 import { renderReport, type BranchResult, type ProjectResult } from "./report.js";
 import type { Runner } from "./runner.js";
 
@@ -39,6 +40,13 @@ export interface ImportOptions {
   confirm?: (question: string) => Promise<boolean>;
   log?: (line: string) => void;
   exists?: (abs: string) => boolean;
+}
+
+// One branch of a saved proposal, the file a user edits between the dry run and --apply --from.
+export interface SavedBranch {
+  branch: string;
+  items: Array<MergedItem & { refs: string[]; created_at?: number; harnesses?: string[] }>;
+  dropped: Array<MergedItem & { missing: string[] }>;
 }
 
 export interface ImportOutcome {
@@ -163,38 +171,23 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
       result.branches.push(branchResult);
       log(`  ${branch}: ${kept.length} items proposed, ${dropped.length} dropped`);
     }
+    // The saved proposal carries what --apply --from needs without the transcripts: the date of the
+    // newest source session and the harnesses it came from.
+    const endedAt = (ids: readonly string[]) => Math.max(0, ...sessions.filter((s) => ids.includes(s.id)).map((s) => s.endedAt));
+    const harnessesOf = (ids: readonly string[]) => [...new Set(sessions.filter((s) => ids.includes(s.id)).map((s) => s.harness))];
+    const saved: SavedBranch[] = result.branches.map((b) => ({
+      branch: b.branch,
+      items: b.items.map((i) => ({ ...i, ...(endedAt(i.sessions) > 0 ? { created_at: endedAt(i.sessions) } : {}), harnesses: harnessesOf(i.sessions) })),
+      dropped: b.dropped,
+    }));
     const file = path.join(outDir, `${safe(project)}.items.json`);
-    writeFileSync(file, `${JSON.stringify(result.branches.map((b) => ({ branch: b.branch, items: b.items, dropped: b.dropped })), null, 2)}\n`, { mode: 0o600 });
+    writeFileSync(file, `${JSON.stringify(saved, null, 2)}\n`, { mode: 0o600 });
     itemsFiles.push(file);
 
     if (opts.apply) {
-      const sha = root ? headSha(root) : "";
-      for (const b of result.branches) {
-        if (b.items.length === 0) continue;
-        // Items are dated by the newest session that produced them, so ranking and decay see the
-        // real age rather than the import time.
-        const endedAt = (ids: readonly string[]) => Math.max(0, ...sessions.filter((s) => ids.includes(s.id)).map((s) => s.endedAt));
-        const inputs: ItemInput[] = b.items.map((i) => ({
-          id: randomUUID(),
-          kind: i.kind,
-          title: i.title,
-          body: i.body,
-          ...(endedAt(i.sessions) > 0 ? { created_at: endedAt(i.sessions) } : {}),
-          refs: i.refs,
-          paths: [],
-          ...(sha ? { commit_sha: sha } : {}),
-          ...(i.key ? { key: i.key } : {}),
-          ...(i.supersedes && i.supersedes.length ? { supersedes: i.supersedes } : {}),
-          provenance: JSON.stringify({ agent: `import:${[...new Set(sessions.filter((s) => i.sessions.includes(s.id)).map((s) => s.harness))].join("+") || opts.runner.name}`, user: opts.config.user ?? "", sessions: i.sessions.slice(0, 20) }),
-        }));
-        try {
-          const out = await client(b.branch).putItems(inputs);
-          uploaded.items += out.count;
-          log(`  ${b.branch}: uploaded ${out.count} items${out.superseded ? `, ${out.superseded} superseded` : ""}`);
-        } catch (err) {
-          result.errors.push(`${b.branch}: upload failed (${err instanceof Error ? err.message : String(err)})`);
-        }
-      }
+      const out = await uploadProposal({ project, root, branches: saved, config: opts.config, runnerName: opts.runner.name, ...(opts.fetch ? { fetch: opts.fetch } : {}), ...(opts.exists ? { exists: opts.exists } : {}), log });
+      uploaded.items += out.items;
+      result.errors.push(...out.errors);
       if (opts.withTurns) {
         const cutoff = now() - TURNS_WINDOW_DAYS * 86_400_000;
         for (const s of sessions.filter((x) => x.endedAt >= cutoff).slice(0, CAPTURE_SESSIONS_MAX)) {
@@ -215,6 +208,115 @@ export async function importSessions(opts: ImportOptions): Promise<ImportOutcome
   log("");
   log(report);
   log("");
-  log(opts.apply ? `uploaded ${uploaded.items} items${opts.withTurns ? ` and ${uploaded.turns} turns` : ""}; proposals saved in ${outDir}` : `dry run: proposals saved in ${outDir}; run again with --apply to upload`);
+  log(
+    opts.apply
+      ? `uploaded ${uploaded.items} items${opts.withTurns ? ` and ${uploaded.turns} turns` : ""}; proposals saved in ${outDir}`
+      : `dry run, nothing uploaded. Review the proposal: ${itemsFiles.join(", ")}\nDelete or edit entries there, then upload exactly that file with: meshpoint import sessions --apply --from <file>\nOr run again with --apply to distill afresh and upload.`,
+  );
   return { results, unmapped, reportFile, itemsFiles, uploaded, cancelled: false };
+}
+
+interface UploadInput {
+  project: string;
+  root: string;
+  branches: readonly SavedBranch[];
+  config: Config;
+  runnerName: string;
+  fetch?: typeof fetch;
+  exists?: (abs: string) => boolean;
+  log: (line: string) => void;
+}
+
+// Writes a proposal's branches through items put semantics: refs re-read from the item text (the
+// file may have been edited), HEAD as the commit, import provenance, dates from the sessions.
+async function uploadProposal(u: UploadInput): Promise<{ items: number; errors: string[] }> {
+  const errors: string[] = [];
+  let count = 0;
+  const sha = u.root ? headSha(u.root) : "";
+  for (const b of u.branches) {
+    if (b.items.length === 0) continue;
+    const { kept, dropped } = u.root ? prune(b.items, u.root, u.exists) : { kept: b.items.map((i) => ({ ...i, refs: i.refs ?? [] })), dropped: [] };
+    for (const d of dropped) u.log(`  ${b.branch}: skipped "${d.title}" (missing ${d.missing.join(", ")})`);
+    const inputs: ItemInput[] = kept.map((i) => {
+      const src = b.items.find((x) => x.title === i.title && x.body === i.body);
+      return {
+        id: randomUUID(),
+        kind: i.kind,
+        title: i.title,
+        body: i.body,
+        ...(src?.created_at ? { created_at: src.created_at } : {}),
+        refs: i.refs,
+        paths: [],
+        ...(sha ? { commit_sha: sha } : {}),
+        ...(i.key ? { key: i.key } : {}),
+        ...(i.supersedes && i.supersedes.length ? { supersedes: i.supersedes } : {}),
+        provenance: JSON.stringify({ agent: `import:${(src?.harnesses ?? []).join("+") || u.runnerName}`, user: u.config.user ?? "", sessions: (i.sessions ?? []).slice(0, 20) }),
+      };
+    });
+    if (inputs.length === 0) continue;
+    try {
+      const client = new MeshpointClient({ baseUrl: u.config.baseUrl, token: u.config.token, project: u.project, branch: b.branch, ...(u.fetch ? { fetch: u.fetch } : {}) });
+      const out = await client.putItems(inputs);
+      count += out.count;
+      u.log(`  ${b.branch}: uploaded ${out.count} items${out.superseded ? `, ${out.superseded} superseded` : ""}`);
+    } catch (err) {
+      errors.push(`${b.branch}: upload failed (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+  return { items: count, errors };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// Reads a proposal file the user reviewed; anything malformed is an error, never a guess.
+export function readProposal(file: string): SavedBranch[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (err) {
+    throw new Error(`${file}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!Array.isArray(parsed)) throw new Error(`${file}: expected an array of {branch, items}`);
+  return parsed.map((b, n) => {
+    if (!isRecord(b) || typeof b.branch !== "string" || !Array.isArray(b.items)) throw new Error(`${file}: entry ${n} needs branch and items`);
+    const items = b.items.map((i, m) => {
+      if (!isRecord(i) || typeof i.kind !== "string" || !(KINDS as readonly string[]).includes(i.kind) || i.kind === "status") throw new Error(`${file}: ${b.branch} item ${m}: kind must be one of ${KINDS.filter((k) => k !== "status").join(", ")}`);
+      if (typeof i.title !== "string" || !i.title.trim() || typeof i.body !== "string" || !i.body.trim()) throw new Error(`${file}: ${b.branch} item ${m}: title and body required`);
+      return {
+        kind: i.kind as MergedItem["kind"],
+        title: i.title.trim(),
+        body: i.body.trim(),
+        sessions: Array.isArray(i.sessions) ? i.sessions.filter((x): x is string => typeof x === "string") : [],
+        refs: Array.isArray(i.refs) ? i.refs.filter((x): x is string => typeof x === "string") : [],
+        ...(typeof i.key === "string" && i.key ? { key: i.key } : {}),
+        ...(i.recurring === true ? { recurring: true } : {}),
+        ...(Array.isArray(i.supersedes) ? { supersedes: i.supersedes.filter((x): x is string => typeof x === "string") } : {}),
+        ...(typeof i.created_at === "number" ? { created_at: i.created_at } : {}),
+        ...(Array.isArray(i.harnesses) ? { harnesses: i.harnesses.filter((x): x is string => typeof x === "string") } : {}),
+      };
+    });
+    return { branch: b.branch, items, dropped: [] };
+  });
+}
+
+export interface ApplyFileOptions {
+  config: Config;
+  file: string;
+  current: { project: string; root: string } | null;
+  fetch?: typeof fetch;
+  exists?: (abs: string) => boolean;
+  log?: (line: string) => void;
+}
+
+// `--apply --from <file>`: upload a reviewed proposal for the current repository, exactly as edited.
+export async function applyProposalFile(opts: ApplyFileOptions): Promise<{ items: number; errors: string[] }> {
+  if (!opts.current) throw new Error("--from uploads into the current repository; run it inside the repo the proposal was made for");
+  const log = opts.log ?? ((l: string) => process.stderr.write(`${l}\n`));
+  const branches = readProposal(opts.file);
+  const out = await uploadProposal({ project: opts.current.project, root: opts.current.root, branches, config: opts.config, runnerName: "file", ...(opts.fetch ? { fetch: opts.fetch } : {}), ...(opts.exists ? { exists: opts.exists } : {}), log });
+  log(`uploaded ${out.items} items from ${opts.file}`);
+  for (const e of out.errors) log(`! ${e}`);
+  return out;
 }

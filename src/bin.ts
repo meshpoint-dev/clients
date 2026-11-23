@@ -24,7 +24,7 @@ import { api, ApiError, canOpenBrowser, deviceLogin, freshConfig, login } from "
 import { detectHarnesses, renderDetected } from "./detect.js";
 import { renderDoctor, runDoctor } from "./doctor.js";
 import { confirmItems, parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
-import { DEFAULT_SINCE_DAYS, importSessions } from "./import/run.js";
+import { applyProposalFile, DEFAULT_SINCE_DAYS, importSessions } from "./import/run.js";
 import { detectRunner, type RunnerName } from "./import/runner.js";
 import { Spool } from "./spool.js";
 
@@ -76,14 +76,16 @@ const USAGE = `meshpoint <command>
   items retract <id>...                    retract items on the current branch; an id may be a prefix
   items confirm <id>...                    confirm items on the current branch (counts toward their rank)
   import sessions [--since <days>] [--all-repos] [--with-turns] [--apply] [--yes]
-                 [--runner claude|codex] [--model <m>] [--min-turns <n>]
+                 [--runner claude|codex] [--model <m>] [--min-turns <n>] [--from <items.json>]
                                            read this machine's harness transcripts (Claude Code, Codex, pi,
                                            opencode, Antigravity, Cursor) for the current repo and the last
                                            90 days, distill them into items with your own agent CLI, and
                                            write a proposal + report under ~/.local/state/meshpoint/import/.
                                            Nothing is uploaded without --apply; older than 90 days or
                                            --all-repos asks first (--yes skips). --with-turns also uploads
-                                           the last 30 days of turns as sessions.
+                                           the last 30 days of turns as sessions. Review the saved
+                                           items.json, delete or edit entries, then upload exactly that
+                                           file with --apply --from <items.json>.
   tap claude-code | codex | cursor | antigravity [<event>] | openclaw
                                            hook entry point; reads one hook payload on stdin
 `;
@@ -258,6 +260,12 @@ async function main(argv: string[]): Promise<number> {
       if (rest[0] !== "sessions") throw new Error("import supports: sessions");
       const config = await requireConfig();
       const repo = repoContext(process.cwd());
+      const from = flag(rest, "--from");
+      if (from !== undefined) {
+        if (!rest.includes("--apply")) throw new Error("--from goes with --apply: it uploads a reviewed proposal file");
+        await withAuth(config, (c) => applyProposalFile({ config: c, file: from, current: repo ? { project: repo.project, root: repo.root } : null }));
+        return 0;
+      }
       const sinceDays = Number(flag(rest, "--since") ?? DEFAULT_SINCE_DAYS);
       if (!Number.isInteger(sinceDays) || sinceDays < 1) throw new Error("--since takes a whole number of days");
       const minTurns = Number(flag(rest, "--min-turns") ?? 6);

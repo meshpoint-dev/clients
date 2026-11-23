@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.2
+
+`import sessions --apply --from <items.json>` uploads a reviewed proposal file exactly as edited (delete entries, fix titles or bodies, change kinds; refs are re-read from the text). The dry run now prints the review path and that command. Saved proposals carry each item's session date and source harnesses.
+
 ## 1.4.1
 
 Imports never write `status` items (a new status would supersede the branch's current one), and imported items carry the time of the newest session that produced them, so ranking and decay see their real age.
