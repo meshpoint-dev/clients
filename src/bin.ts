@@ -24,6 +24,8 @@ import { api, ApiError, canOpenBrowser, deviceLogin, freshConfig, login } from "
 import { detectHarnesses, renderDetected } from "./detect.js";
 import { renderDoctor, runDoctor } from "./doctor.js";
 import { confirmItems, parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
+import { DEFAULT_SINCE_DAYS, importSessions } from "./import/run.js";
+import { detectRunner, type RunnerName } from "./import/runner.js";
 import { Spool } from "./spool.js";
 
 const USAGE = `meshpoint <command>
@@ -73,6 +75,15 @@ const USAGE = `meshpoint <command>
                                            stdin form takes a JSON array of {kind, title, body}
   items retract <id>...                    retract items on the current branch; an id may be a prefix
   items confirm <id>...                    confirm items on the current branch (counts toward their rank)
+  import sessions [--since <days>] [--all-repos] [--with-turns] [--apply] [--yes]
+                 [--runner claude|codex] [--model <m>] [--min-turns <n>]
+                                           read this machine's harness transcripts (Claude Code, Codex, pi,
+                                           opencode, Antigravity, Cursor) for the current repo and the last
+                                           90 days, distill them into items with your own agent CLI, and
+                                           write a proposal + report under ~/.local/state/meshpoint/import/.
+                                           Nothing is uploaded without --apply; older than 90 days or
+                                           --all-repos asks first (--yes skips). --with-turns also uploads
+                                           the last 30 days of turns as sessions.
   tap claude-code | codex | cursor | antigravity [<event>] | openclaw
                                            hook entry point; reads one hook payload on stdin
 `;
@@ -242,6 +253,35 @@ async function main(argv: string[]): Promise<number> {
       for (const m of missing) console.error(`ref not found: ${m}`);
       console.log(JSON.stringify({ ...out, project: repo.project, branch: repo.branch }));
       return 0;
+    }
+    case "import": {
+      if (rest[0] !== "sessions") throw new Error("import supports: sessions");
+      const config = await requireConfig();
+      const repo = repoContext(process.cwd());
+      const sinceDays = Number(flag(rest, "--since") ?? DEFAULT_SINCE_DAYS);
+      if (!Number.isInteger(sinceDays) || sinceDays < 1) throw new Error("--since takes a whole number of days");
+      const minTurns = Number(flag(rest, "--min-turns") ?? 6);
+      const prefer = flag(rest, "--runner") as RunnerName | undefined;
+      if (prefer !== undefined && prefer !== "claude" && prefer !== "codex") throw new Error("--runner takes claude or codex");
+      const model = flag(rest, "--model");
+      const runner = detectRunner(process.env, prefer, model);
+      if (!runner) throw new Error("no agent CLI found on PATH (claude or codex); install one to distill transcripts, or write items by hand with meshpoint items put");
+      const defaultBranch = repo ? repo.branch : "master";
+      const out = await withAuth(config, (c) =>
+        importSessions({
+          config: c,
+          current: repo ? { project: repo.project, root: repo.root, defaultBranch } : null,
+          sinceDays,
+          allRepos: rest.includes("--all-repos"),
+          withTurns: rest.includes("--with-turns"),
+          apply: rest.includes("--apply"),
+          yes: rest.includes("--yes"),
+          minTurns,
+          runner,
+          stateDir: stateDir(),
+        }),
+      );
+      return out.cancelled ? 1 : 0;
     }
     case "tap": {
       const harness = rest[0];

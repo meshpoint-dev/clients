@@ -27,7 +27,8 @@ describe("refs", () => {
   });
 
   it("maps absolute paths inside the root to relative ones and drops paths outside it", () => {
-    expect(extractRefs("edit /repo/src/auth.ts and /etc/hosts and ~/package.json", "/repo", exists)).toEqual({ refs: ["src/auth.ts", "package.json"], missing: ["/etc/hosts"] });
+    // Absolute paths outside the repository are neither refs nor misses.
+    expect(extractRefs("edit /repo/src/auth.ts and /etc/hosts and /dev/null and ~/package.json", "/repo", exists)).toEqual({ refs: ["src/auth.ts", "package.json"], missing: [] });
     expect(extractRefs("directory src/auth holds it", "/repo", exists).refs).toEqual(["src/auth"]);
   });
 });

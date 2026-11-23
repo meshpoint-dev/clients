@@ -61,6 +61,8 @@ export function extractRefs(text: string, root: string, exists: (p: string) => b
     const pathLike = looksLikePath(token);
     // Backticked tokens may be bare file names (Makefile); they count only when they exist.
     if (!pathLike && strict) return;
+    // An absolute path outside the repository (/dev/null, /etc/hosts) is not a ref and not a miss.
+    if (path.isAbsolute(token) && path.relative(root, token).startsWith("..")) return;
     const rel = resolve(token, root, exists);
     if (rel) refs.add(rel);
     else if (pathLike) missing.add(token);

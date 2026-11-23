@@ -103,6 +103,10 @@ Distillation is agent-side: the platform runs no model. `connect` installs the `
 
 The session-start inject shows each item's id prefix so the skill can retract what the session made obsolete (`meshpoint items retract <prefix>...`, resolved against a fresh recall; ambiguous prefixes are refused).
 
+## Importing old sessions
+
+`meshpoint import sessions` seeds a repository from the transcripts your harnesses already keep: `~/.claude/projects/*/*.jsonl` (cwd and gitBranch per record), `~/.codex/sessions/**/rollout-*.jsonl` (session_meta has cwd and git), `~/.pi/agent/sessions/*/*.jsonl`, opencode's `storage/{session,message,part}`, Antigravity chats under `~/.gemini/tmp/<sha256 of the directory>/chats/`. Each session maps to a project through its directory's origin remote. Every session is distilled with your own agent CLI (`claude -p --tools "" --setting-sources ""`, or `codex exec`) using the checkpoint skill's rules; a second call per branch merges duplicates, keys conventions, marks recurring gotchas and names live items the proposals supersede; items naming files the checkout no longer has are dropped and listed. The proposal and a report (sessions per harness, span, most-touched files, items by kind, recurring gotchas first) land under `~/.local/state/meshpoint/import/`. Nothing is uploaded without `--apply`; `--with-turns` adds the last 30 days of turns as sessions. Current repo and 90 days by default; `--since <days>` past that or `--all-repos` asks y/N first.
+
 ## Refs, verification and the edit hook
 
 `items put` reads repo-relative paths out of each item's title and body (`src/auth.ts`, `package.json`, backticked `Makefile`), keeps the ones that exist as the item's `refs`, attaches the files edited on the branch since the last checkpoint (recorded by every adapter under `~/.local/state/meshpoint/touched/`) as `paths`, and records HEAD as `commit_sha`. Path-like tokens that resolve to nothing print `ref not found: <path>` so the agent can fix a typo.
