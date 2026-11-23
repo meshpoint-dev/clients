@@ -39,7 +39,7 @@ const IMPORT_USAGE = `  import sessions [--since <days>] [--all-repos] [--with-t
                                            items without one are dropped. Per-session results are cached
                                            there too, so a rerun only distills new or changed sessions
                                            (--fresh ignores the cache). Items from a branch that is gone or
-                                           already merged land on the current branch.
+                                           already merged land on the default branch.
                                            Nothing is uploaded without --apply; older than 90 days or
                                            --all-repos asks first (--yes skips). --with-turns also uploads
                                            the last 30 days of turns as sessions. Review the saved
