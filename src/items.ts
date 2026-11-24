@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { KINDS, MeshpointClient, type ItemInput, type Kind } from "@meshpoint/sdk";
+import { KINDS, MeshpointClient, type Item, type ItemInput, type Kind } from "@meshpoint/sdk";
 import type { Checkpoints } from "./checkpoints.js";
 import type { Config, RepoContext } from "./config.js";
 import { extractRefs, headSha } from "./refs.js";
@@ -151,6 +151,12 @@ async function resolveIds(prefixes: readonly string[], deps: ItemDeps, client: M
     if (matches.length > 1) throw new Error(`${prefix} matches ${matches.length} items; give more characters`);
     return matches[0] as string;
   });
+}
+
+// Every live item on the branch, fresh from the origin.
+export async function branchItems(deps: ItemDeps): Promise<Item[]> {
+  const { items } = await clientFor(deps).recall({ budget: ALL_ITEMS_BUDGET, fresh: true });
+  return items;
 }
 
 export async function confirmItems(prefixes: readonly string[], deps: ItemDeps): Promise<{ confirmed: string[] }> {

@@ -42,7 +42,7 @@ export interface OpencodeHookDeps {
   client: OpencodeClient;
   // The project directory opencode was started in; sessions report their own when they differ.
   directory: string;
-  openTap: (session: string, cwd: string) => Promise<Tap | null>;
+  openTap: (session: string, cwd: string, harness?: string) => Promise<Tap | null>;
   // Longest the first model request waits for the session-start inject.
   injectWaitMs?: number;
   now?: () => number;
@@ -114,7 +114,7 @@ export function createOpencodeHooks(deps: OpencodeHookDeps): OpencodeHooks {
       nudge: null,
     };
     s.opened = deps
-      .openTap(id, cwd)
+      .openTap(id, cwd, "opencode")
       .then((tap) => {
         s.tap = tap;
       })

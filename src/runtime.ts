@@ -9,7 +9,7 @@ import { Touched } from "./touched.js";
 // A Tap for one harness session, wired to the stored login and the on-disk spool. Null when the
 // machine is not logged in or the directory is not a repo with an origin remote. In-process
 // adapters (pi, opencode, openclaw) call this once per harness session.
-export async function openTap(session: string, cwd: string): Promise<Tap | null> {
+export async function openTap(session: string, cwd: string, harness?: string): Promise<Tap | null> {
   const stored = loadConfig();
   if (!stored) return null;
   const repo = repoContext(cwd);
@@ -24,7 +24,7 @@ export async function openTap(session: string, cwd: string): Promise<Tap | null>
     checkpoints: new Checkpoints(stateDir()),
     touched: new Touched(stateDir()),
     cache: new SessionCache(stateDir()),
-    local: localChecks(repo.root),
+    local: localChecks(repo.root, harness),
     refresh: () => freshConfig(config, { force: true }).catch(() => null),
   });
 }

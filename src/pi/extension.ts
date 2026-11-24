@@ -58,7 +58,7 @@ export interface PiApi {
 export type TapLike = Pick<Tap, "start" | "user" | "assistant" | "nudge" | "end" | "edit">;
 
 export interface PiExtensionDeps {
-  open?: (session: string, cwd: string) => Promise<TapLike | null>;
+  open?: (session: string, cwd: string, harness?: string) => Promise<TapLike | null>;
   now?: () => number;
 }
 
@@ -111,7 +111,7 @@ export function meshpointExtension(pi: PiApi, deps: PiExtensionDeps = {}): void 
 
   pi.on("session_start", (_event, ctx) =>
     quiet(async () => {
-      tap = await open(ctx.sessionManager.getSessionId(), ctx.cwd);
+      tap = await open(ctx.sessionManager.getSessionId(), ctx.cwd, "pi");
       if (!tap) return;
       entries = assistantEntries(ctx.sessionManager.getBranch());
       texts = [];

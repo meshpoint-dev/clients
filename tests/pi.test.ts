@@ -67,7 +67,7 @@ describe("pi extension", () => {
     meshpointExtension(pi, { open });
 
     await pi.emit("session_start", { reason: "startup" });
-    expect(open).toHaveBeenCalledWith("sess-1", "/repo/sub");
+    expect(open).toHaveBeenCalledWith("sess-1", "/repo/sub", "pi");
     const first = await pi.emit("before_agent_start", { messageType: "user", prompt: "fix it" });
     expect(first).toEqual({ message: { customType: INJECT_TYPE, content: "# Meshpoint: recall", display: false } });
     expect(tap.calls).toEqual(["start", "user:fix it"]);

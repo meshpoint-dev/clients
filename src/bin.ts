@@ -23,9 +23,10 @@ import { MeshpointError } from "@meshpoint/sdk";
 import { api, ApiError, canOpenBrowser, deviceLogin, freshConfig, login } from "./control.js";
 import { detectHarnesses, renderDetected } from "./detect.js";
 import { renderDoctor, runDoctor } from "./doctor.js";
-import { confirmItems, parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
+import { branchItems, confirmItems, parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
 import { importOffer } from "./import/offer.js";
 import { applyProposalFile, DEFAULT_SINCE_DAYS, importSessions } from "./import/run.js";
+import { AGENTS_FILE, exportConventions, hasBlock } from "./agents-md.js";
 import { detectRunner, type RunnerName } from "./import/runner.js";
 import { Spool } from "./spool.js";
 
@@ -95,6 +96,10 @@ const USAGE = `meshpoint <command>
                                            stdin form takes a JSON array of {kind, title, body}
   items retract <id>...                    retract items on the current branch; an id may be a prefix
   items confirm <id>...                    confirm items on the current branch (counts toward their rank)
+  export agents [--file <path>] [--check]  write the branch's conventions as a marked block in AGENTS.md
+                                           (or --file, repo-relative) for agents that read that file
+                                           without a hook; the block is the only part touched, rerun to
+                                           refresh. --check exits 1 when the block is out of date
 ${IMPORT_USAGE}  tap claude-code | codex | cursor | antigravity [<event>] | openclaw
                                            hook entry point; reads one hook payload on stdin
 `;
@@ -247,8 +252,10 @@ async function main(argv: string[]): Promise<number> {
       if (!remove) {
         // Past sessions for this repository are worth a line; the offer never fails the connect.
         try {
-          const offer = importOffer({ repo: repoContext(process.cwd()), env: process.env, runner: detectRunner(process.env)?.name ?? null });
+          const repo = repoContext(process.cwd());
+          const offer = importOffer({ repo, env: process.env, runner: detectRunner(process.env)?.name ?? null });
           if (offer) console.log(`\n${offer}`);
+          if (repo && !hasBlock(repo.root)) console.log(`\nAgents without a hook read ${AGENTS_FILE}: meshpoint export agents writes the team's conventions there.`);
         } catch {
           // unreadable store or no git
         }
@@ -274,6 +281,21 @@ async function main(argv: string[]): Promise<number> {
       for (const m of missing) console.error(`ref not found: ${m}`);
       console.log(JSON.stringify({ ...out, project: repo.project, branch: repo.branch }));
       return 0;
+    }
+    case "export": {
+      if (rest[0] !== "agents") throw new Error("export supports: agents");
+      const config = await requireConfig();
+      const repo = repoContext(process.cwd());
+      if (!repo) throw new Error("not inside a git repo with an origin remote");
+      const file = flag(rest, "--file");
+      if (file !== undefined && (path.isAbsolute(file) || file.split(/[\\/]/).includes(".."))) throw new Error("--file is a path inside the repository");
+      const check = rest.includes("--check");
+      const items = await withAuth(config, (c) => branchItems({ config: c, repo }));
+      const out = exportConventions(items, repo.root, { ...(file ? { file } : {}), check });
+      const what = `${out.count} convention${out.count === 1 ? "" : "s"} on ${repo.branch}`;
+      if (check) console.log(out.changed ? `${out.file} is out of date (${what}); run meshpoint export agents` : `${out.file} is up to date (${what})`);
+      else console.log(out.changed ? `${out.created ? "created" : "updated"} ${out.file}: ${what}. Commit it so every agent and teammate reads it.` : `${out.file} already up to date (${what})`);
+      return check && out.changed ? 1 : 0;
     }
     case "import": {
       if (rest[0] !== "sessions") throw new Error("import supports: sessions");
@@ -339,7 +361,7 @@ async function main(argv: string[]): Promise<number> {
         checkpoints: new Checkpoints(stateDir()),
         touched: new Touched(stateDir()),
         cache: new SessionCache(stateDir()),
-        local: (root: string) => localChecks(root),
+        local: (root: string) => localChecks(root, harness),
       });
       // Each harness has its own "do nothing" answer, needed even without a login.
       if (harness === "cursor") {

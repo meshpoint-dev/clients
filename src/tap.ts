@@ -1,5 +1,6 @@
 import path from "node:path";
 import { isExpired, MeshpointClient, MeshpointError, redact, type Item, type Presence, type RecallResponse } from "@meshpoint/sdk";
+import { committedConventions, type CommittedConventions } from "./agents-md.js";
 import type { Checkpoints } from "./checkpoints.js";
 import { SKILL_NAME } from "./claude-code/skill.js";
 import type { TranscriptEntry } from "./claude-code/transcript.js";
@@ -10,17 +11,20 @@ import type { Spool, SpooledTurn } from "./spool.js";
 import type { Touched } from "./touched.js";
 import { gitRunner, sightings, verifyItems, type Verdict } from "./verify.js";
 
-// Checks that need the checkout: verification of items and the search for instruction files.
+// Checks that need the checkout: verification of items, the search for instruction files, and the
+// conventions the harness already reads from a committed AGENTS.md block.
 export interface LocalChecks {
   verify(items: readonly Item[]): Map<string, Verdict>;
   instructionFiles(): string[];
+  committedConventions?(): CommittedConventions | null;
 }
 
-export function localChecks(root: string): LocalChecks {
+export function localChecks(root: string, harness?: string): LocalChecks {
   const git = gitRunner(root);
   return {
     verify: (items) => verifyItems(items, root, { git }),
     instructionFiles: () => instructionFiles(git),
+    committedConventions: () => (harness ? committedConventions(root, harness) : null),
   };
 }
 
@@ -98,7 +102,7 @@ export class Tap {
         presence,
         new Promise<Presence[]>((r) => setTimeout(() => r([]), this.deps.presenceWaitMs ?? DEFAULT_PRESENCE_WAIT_MS)),
       ]);
-      let text = renderInject(this.repo, recall, teammates, this.now(), verdicts);
+      let text = renderInject(this.repo, recall, teammates, this.now(), verdicts, this.deps.local?.committedConventions?.() ?? null);
       const nudge = this.importNudge(recall);
       if (nudge) text = `${text || `# Meshpoint: ${this.repo.project} @ ${this.repo.branch}`}\n\n${nudge}`;
       await this.flush(false);
@@ -259,7 +263,7 @@ function estimateTokens(item: Pick<Item, "title" | "body">): number {
 // file is gone in this checkout) leave the list for a short section of their own; suspect items
 // (a referenced file changed since) stay, marked. Items the platform already marks suspect from
 // other checkouts carry the mark too.
-export function renderInject(repo: RepoContext, recall: RecallResponse, presence: Presence[], now: number, verdicts: ReadonlyMap<string, Verdict> = new Map()): string {
+export function renderInject(repo: RepoContext, recall: RecallResponse, presence: Presence[], now: number, verdicts: ReadonlyMap<string, Verdict> = new Map(), committed: CommittedConventions | null = null): string {
   if (recall.items.length === 0 && !recall.checkpoint && presence.length === 0) return "";
   const lines: string[] = [`# Meshpoint: ${repo.project} @ ${repo.branch}`];
   if (presence.length > 0) {
@@ -274,16 +278,24 @@ export function renderInject(repo: RepoContext, recall: RecallResponse, presence
   const stale = current.filter((i) => verdicts.get(i.id) === "stale");
   const live: Item[] = [];
   let used = 0;
+  // Conventions the harness already read from the committed block are not repeated.
+  let inFile = 0;
   for (const i of current) {
     if (verdicts.get(i.id) === "stale") continue;
+    if (i.kind === "convention" && committed?.ids.has(i.id)) {
+      inFile += 1;
+      continue;
+    }
     const t = estimateTokens(i);
     if (used + t > INJECT_BUDGET_TOKENS) break;
     live.push(i);
     used += t;
   }
-  if (live.length > 0) {
+  if (live.length > 0 || inFile > 0) {
     const marked = live.some((i) => isSuspect(i, verdicts));
-    lines.push("", `## Team knowledge (${live.length}; first column is the item id${marked ? ", ? means a referenced file changed since" : ""})`);
+    const notes = live.length > 0 ? [`first column is the item id${marked ? ", ? means a referenced file changed since" : ""}`] : [];
+    if (inFile > 0) notes.push(`${inFile} convention${inFile === 1 ? " is" : "s are"} in ${committed!.file}`);
+    lines.push("", `## Team knowledge (${live.length > 0 ? `${live.length}; ` : ""}${notes.join("; ")})`);
     for (const i of live) lines.push(`- ${i.id.slice(0, ID_PREFIX_CHARS)}${isSuspect(i, verdicts) ? "?" : ""} [${i.kind}] ${i.title}: ${i.body}`);
   }
   if (stale.length > 0) {

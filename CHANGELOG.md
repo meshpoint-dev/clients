@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0
+
+`meshpoint export agents [--file <path>] [--check]` writes the branch's conventions into `AGENTS.md` as a marked block, one line per convention with its item id, for agents that read the file without a hook and for teammates without Meshpoint. Only the block is touched; a rerun refreshes it in place and `--check` exits 1 when it is out of date. The session-start context leaves out conventions the harness already reads from the file (Codex, Cursor, pi, opencode read `AGENTS.md`; Claude Code through `CLAUDE.md` or its `@AGENTS.md` import) and says how many are there. `connect` points at the command when the repository has no block yet.
+
+## 1.6.0
+
+`import sessions --help` prints the flags and runs nothing. Discovery reads transcript headers only, so a run starts within seconds. Per-session results are cached under `~/.local/state/meshpoint/import/cache/` (`--fresh` ignores them). Every proposed item carries a verbatim transcript quote as evidence, checked against the transcript; items without one are dropped. Items from a branch that is gone or already merged land on the default branch. After `connect`, the CLI says how many past sessions it found for the repository and the command to import them.
+
 ## 1.5.0
 
 `import sessions --propose` sends the proposal to the platform and prints a console link; the review page shows every item per branch with checkboxes and editable fields, and the author or an admin applies it there. Nothing is written until then.
