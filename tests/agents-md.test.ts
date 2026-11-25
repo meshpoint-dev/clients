@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Item } from "@meshpoint/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { applyBlock, BLOCK_END, BLOCK_START, blockIds, committedConventions, currentConventions, exportConventions, hasBlock, renderBlock } from "../src/agents-md.js";
+import { applyBlock, BLOCK_END, BLOCK_START, blockIds, committedConventions, CONTEXT_END, CONTEXT_START, currentConventions, exportConventions, hasBlock, renderBlock, writeContext } from "../src/agents-md.js";
 import { renderInject } from "../src/tap.js";
 
 let root: string;
@@ -49,6 +49,22 @@ describe("conventions block", () => {
     const more = [...items, item("c3456789", { created_at: 3 })];
     expect(exportConventions(more, root, { now: 10, check: true })).toMatchObject({ changed: true, count: 3 });
     expect(blockIds(readFileSync(path.join(root, "AGENTS.md"), "utf8")).size).toBe(2);
+  });
+
+  it("writes the context block beside the conventions block and replaces it on rerun", () => {
+    exportConventions(items, root, { now: 10 });
+    const first = writeContext("# Meshpoint: p @ master\n\n## Team knowledge (1)\n- a1 [decision] X: y", root);
+    expect(first).toEqual({ file: "AGENTS.md", created: false, changed: true });
+    let text = readFileSync(path.join(root, "AGENTS.md"), "utf8");
+    expect(text).toContain(`${CONTEXT_START}\n# Meshpoint: p @ master`);
+    expect(text).toContain(CONTEXT_END);
+    expect(blockIds(text)).toEqual(new Set(["a1234567", "b2345678"]));
+    expect(writeContext("# Meshpoint: p @ master\n\n## Team knowledge (1)\n- a1 [decision] X: y", root).changed).toBe(false);
+    writeContext("", root);
+    text = readFileSync(path.join(root, "AGENTS.md"), "utf8");
+    expect(text).toContain("No team knowledge for this branch yet.");
+    expect(text.match(/meshpoint:context start/g)).toHaveLength(1);
+    expect(text).toContain(BLOCK_START);
   });
 
   it("targets another file inside the repository", () => {

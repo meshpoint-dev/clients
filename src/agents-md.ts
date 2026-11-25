@@ -10,6 +10,9 @@ import { isExpired, type Item } from "@meshpoint/sdk";
 export const AGENTS_FILE = "AGENTS.md";
 export const BLOCK_START = "<!-- meshpoint:conventions start -->";
 export const BLOCK_END = "<!-- meshpoint:conventions end -->";
+// The session-start context for a job that has no hook (CI, cloud agents): written per checkout, not committed.
+export const CONTEXT_START = "<!-- meshpoint:context start -->";
+export const CONTEXT_END = "<!-- meshpoint:context end -->";
 const ID_TAG = /<!--\s*mp:([A-Za-z0-9_-]{8,})\s*-->/g;
 const CLAUDE_IMPORT = /^@(?:\.\/)?AGENTS\.md\s*$/m;
 
@@ -41,11 +44,11 @@ export function renderBlock(items: readonly Item[]): string {
 }
 
 // Replaces the block in place, appends it to a file without one, or starts a new file.
-export function applyBlock(existing: string | null, block: string): string {
+export function applyBlock(existing: string | null, block: string, markers: [string, string] = [BLOCK_START, BLOCK_END]): string {
   if (existing === null) return `# Agent instructions\n\n${block}\n`;
-  const start = existing.indexOf(BLOCK_START);
-  const end = existing.indexOf(BLOCK_END, start);
-  if (start >= 0 && end > start) return `${existing.slice(0, start)}${block}${existing.slice(end + BLOCK_END.length)}`;
+  const start = existing.indexOf(markers[0]);
+  const end = existing.indexOf(markers[1], start);
+  if (start >= 0 && end > start) return `${existing.slice(0, start)}${block}${existing.slice(end + markers[1].length)}`;
   const head = existing.replace(/\s+$/, "");
   return `${head ? `${head}\n\n` : ""}${block}\n`;
 }
@@ -78,6 +81,18 @@ export function exportConventions(items: readonly Item[], root: string, opts: Ex
   const changed = next !== existing;
   if (changed && !opts.check) writeFileSync(abs, next);
   return { file: rel, created: existing === null, changed, count: conventions.length };
+}
+
+// The inject text as a block for a checkout without hooks. Replaces an earlier block, leaves the
+// conventions block alone, and answers whether the file changed.
+export function writeContext(text: string, root: string, file = AGENTS_FILE): { file: string; created: boolean; changed: boolean } {
+  const abs = path.join(root, file);
+  const existing = read(abs);
+  const body = text.trim() || "No team knowledge for this branch yet.";
+  const next = applyBlock(existing, `${CONTEXT_START}\n${body}\n${CONTEXT_END}`, [CONTEXT_START, CONTEXT_END]);
+  const changed = next !== existing;
+  if (changed) writeFileSync(abs, next);
+  return { file, created: existing === null, changed };
 }
 
 export function hasBlock(root: string, file = AGENTS_FILE): boolean {

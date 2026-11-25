@@ -27,7 +27,7 @@ import { renderDoctor, runDoctor } from "./doctor.js";
 import { branchItems, confirmItems, parseItemArgs, parseItems, putItems, retractItems } from "./items.js";
 import { importOffer } from "./import/offer.js";
 import { applyProposalFile, DEFAULT_SINCE_DAYS, importSessions } from "./import/run.js";
-import { AGENTS_FILE, exportConventions, hasBlock } from "./agents-md.js";
+import { AGENTS_FILE, exportConventions, hasBlock, writeContext } from "./agents-md.js";
 import { connectMcp } from "./mcp/connect.js";
 import { McpServer } from "./mcp/server.js";
 import { MCP_INSTRUCTIONS, MCP_SERVER_NAME, meshpointTools } from "./mcp/tools.js";
@@ -106,6 +106,9 @@ const USAGE = `meshpoint <command>
                                            stdin form takes a JSON array of {kind, title, body}
   items retract <id>...                    retract items on the current branch; an id may be a prefix
   items confirm <id>...                    confirm items on the current branch (counts toward their rank)
+  context write [--file <path>]            write the session-start context (team knowledge, verification
+                                           marks, teammates) as a marked block in AGENTS.md for a checkout
+                                           without hooks: CI jobs and cloud agents. Not for committing
   export agents [--file <path>] [--check]  write the branch's conventions as a marked block in AGENTS.md
                                            (or --file, repo-relative) for agents that read that file
                                            without a hook; the block is the only part touched, rerun to
@@ -323,6 +326,20 @@ async function main(argv: string[]): Promise<number> {
         tools: meshpointTools({ tap, cwd, config: requireConfig, checkpoints: new Checkpoints(stateDir()), touched: new Touched(stateDir()) }),
       });
       await server.serve(process.stdin, process.stdout);
+      return 0;
+    }
+    case "context": {
+      if (rest[0] !== "write") throw new Error("context supports: write");
+      const config = await requireConfig();
+      const repo = repoContext(process.cwd());
+      if (!repo) throw new Error("not inside a git repo with an origin remote");
+      const file = flag(rest, "--file");
+      if (file !== undefined && (path.isAbsolute(file) || file.split(/[\\/]/).includes(".."))) throw new Error("--file is a path inside the repository");
+      const tap = new Tap({ config, repo, session: `context-${randomUUID()}`, spool: new Spool(spoolDir()), checkpoints: new Checkpoints(stateDir()), local: localChecks(repo.root), refresh: () => freshConfig(config, { force: true }).catch(() => null) });
+      const text = await tap.start();
+      const out = writeContext(text, repo.root, file);
+      const items = (text.match(/^- /gm) ?? []).length;
+      console.log(`${out.created ? "created" : out.changed ? "updated" : "unchanged"} ${out.file}: context for ${repo.project} @ ${repo.branch}, ${items} line${items === 1 ? "" : "s"}. Not for committing.`);
       return 0;
     }
     case "export": {

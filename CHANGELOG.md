@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.0
+
+`meshpoint context write [--file <path>]`: the session-start context (team knowledge with item ids, verification marks against this checkout, the stale list, teammates active) as a marked block in `AGENTS.md`, for a checkout without hooks: CI jobs and cloud agents logged in with a service account token. The block sits beside the conventions block from `export agents` and is replaced in place on rerun. `whoami` on a service account token shows the account under `service`.
+
 ## 1.8.0
 
 `meshpoint mcp [--cwd <dir>]`: a stdio MCP server for agents without a hook (VS Code with Copilot, Claude Desktop, Zed, cloud agents). Tools: `meshpoint_recall` (the session-start block), `meshpoint_file_context` (the pre-edit notice, every call), `meshpoint_items_put`, `meshpoint_items_retract`, `meshpoint_items_confirm`. The server's instructions carry the checkpoint rules. `meshpoint connect mcp --project <repo>` writes the entry into `<repo>/.mcp.json` (Claude Code project scope, VS Code with Copilot); without `--project` it prints the entry and the user-level file per client. No capture, presence or nudge on this path.
