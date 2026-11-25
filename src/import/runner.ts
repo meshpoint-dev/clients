@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DISTILL_SYSTEM as SYSTEM } from "@meshpoint/sdk";
 import type { Environment } from "../config.js";
 
 // The user's own agent CLI as a bare model: one prompt in, one answer out, no tools, no project
@@ -14,7 +15,6 @@ export interface Runner {
   run(prompt: string): Promise<string>;
 }
 
-const SYSTEM = "You are a careful assistant. Follow the instructions in the message exactly. No tools, no preamble, output only what is asked.";
 const TIMEOUT_MS = 10 * 60_000;
 
 function onPath(bin: string, env: Environment): boolean {
@@ -85,14 +85,4 @@ export function detectRunner(env: Environment, prefer?: RunnerName, model?: stri
   return null;
 }
 
-// The first JSON array or object in a model reply, code fences tolerated.
-export function jsonBlock(text: string): unknown {
-  let s = text.trim();
-  if (s.startsWith("```")) {
-    s = s.includes("\n") ? s.slice(s.indexOf("\n") + 1) : s.slice(3);
-    s = s.lastIndexOf("```") >= 0 ? s.slice(0, s.lastIndexOf("```")) : s;
-  }
-  const starts = [s.indexOf("["), s.indexOf("{")].filter((i) => i >= 0);
-  const start = starts.length ? Math.min(...starts) : 0;
-  return JSON.parse(s.slice(start));
-}
+export { jsonBlock } from "@meshpoint/sdk";

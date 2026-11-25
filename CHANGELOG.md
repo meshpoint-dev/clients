@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.0
+
+The distillation prompts and parsers behind `import sessions` now come from `@meshpoint/sdk` 1.4.0, shared with the platform's console Distill action, so both paths send the model the same prompt for the same transcript. No change in behaviour.
+
 ## 1.9.0
 
 `meshpoint context write [--file <path>]`: the session-start context (team knowledge with item ids, verification marks against this checkout, the stale list, teammates active) as a marked block in `AGENTS.md`, for a checkout without hooks: CI jobs and cloud agents logged in with a service account token. The block sits beside the conventions block from `export agents` and is replaced in place on rerun. `whoami` on a service account token shows the account under `service`.
