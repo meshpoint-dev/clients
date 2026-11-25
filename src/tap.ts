@@ -128,16 +128,23 @@ export class Tap {
       const rel = this.relative(filePath);
       if (!rel) return "";
       if (this.deps.cache && !this.deps.cache.firstEdit(this.deps.session, rel)) return "";
-      const cached = this.deps.cache?.loadRecall(this.deps.session);
-      const ctx = await Promise.race([
-        this.client(this.repo.branch).context(rel).catch(() => null),
-        new Promise<null>((r) => setTimeout(() => r(null), EDIT_WAIT_MS)),
-      ]);
-      const items = cached ? itemsForFile(cached.items, cached.verdicts, rel) : (ctx?.items ?? []);
-      return renderEditNotice(rel, items, ctx?.presence ?? [], this.now());
+      return await this.fileContext(rel);
     } catch {
       return "";
     }
+  }
+
+  // The same notice on demand, every time it is asked for (the MCP tool).
+  async fileContext(filePath: string): Promise<string> {
+    const rel = this.relative(filePath);
+    if (!rel) return "";
+    const cached = this.deps.cache?.loadRecall(this.deps.session);
+    const ctx = await Promise.race([
+      this.client(this.repo.branch).context(rel).catch(() => null),
+      new Promise<null>((r) => setTimeout(() => r(null), EDIT_WAIT_MS)),
+    ]);
+    const items = cached ? itemsForFile(cached.items, cached.verdicts, rel) : (ctx?.items ?? []);
+    return renderEditNotice(rel, items, ctx?.presence ?? [], this.now());
   }
 
   async user(prompt: string): Promise<void> {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.0
+
+`meshpoint mcp [--cwd <dir>]`: a stdio MCP server for agents without a hook (VS Code with Copilot, Claude Desktop, Zed, cloud agents). Tools: `meshpoint_recall` (the session-start block), `meshpoint_file_context` (the pre-edit notice, every call), `meshpoint_items_put`, `meshpoint_items_retract`, `meshpoint_items_confirm`. The server's instructions carry the checkpoint rules. `meshpoint connect mcp --project <repo>` writes the entry into `<repo>/.mcp.json` (Claude Code project scope, VS Code with Copilot); without `--project` it prints the entry and the user-level file per client. No capture, presence or nudge on this path.
+
 ## 1.7.0
 
 `meshpoint export agents [--file <path>] [--check]` writes the branch's conventions into `AGENTS.md` as a marked block, one line per convention with its item id, for agents that read the file without a hook and for teammates without Meshpoint. Only the block is touched; a rerun refreshes it in place and `--check` exits 1 when it is out of date. The session-start context leaves out conventions the harness already reads from the file (Codex, Cursor, pi, opencode read `AGENTS.md`; Claude Code through `CLAUDE.md` or its `@AGENTS.md` import) and says how many are there. `connect` points at the command when the repository has no block yet.

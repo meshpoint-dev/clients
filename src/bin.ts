@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +18,7 @@ import { connectPi } from "./pi/connect.js";
 import { Checkpoints } from "./checkpoints.js";
 import { configPath, deleteConfig, loadConfig, repoContext, saveConfig, spoolDir, stateDir, type Config } from "./config.js";
 import { SessionCache } from "./context.js";
-import { localChecks } from "./tap.js";
+import { localChecks, Tap } from "./tap.js";
 import { Touched } from "./touched.js";
 import { MeshpointError } from "@meshpoint/sdk";
 import { api, ApiError, canOpenBrowser, deviceLogin, freshConfig, login } from "./control.js";
@@ -27,6 +28,9 @@ import { branchItems, confirmItems, parseItemArgs, parseItems, putItems, retract
 import { importOffer } from "./import/offer.js";
 import { applyProposalFile, DEFAULT_SINCE_DAYS, importSessions } from "./import/run.js";
 import { AGENTS_FILE, exportConventions, hasBlock } from "./agents-md.js";
+import { connectMcp } from "./mcp/connect.js";
+import { McpServer } from "./mcp/server.js";
+import { MCP_INSTRUCTIONS, MCP_SERVER_NAME, meshpointTools } from "./mcp/tools.js";
 import { detectRunner, type RunnerName } from "./import/runner.js";
 import { Spool } from "./spool.js";
 
@@ -90,6 +94,12 @@ const USAGE = `meshpoint <command>
     opencode [--config-dir <dir>]          <dir>/plugins/meshpoint.js + <dir>/skills/meshpoint
                                            (default dir: ~/.config/opencode)
     openclaw                               hook pack installed through 'openclaw plugins install'
+    mcp                                    prints where MCP clients take the server; --project <dir>
+                                           writes <dir>/.mcp.json (Claude Code project scope, VS Code
+                                           with Copilot)
+  mcp [--cwd <dir>]                        stdio MCP server for clients without a hook: tools for recall,
+                                           file context and item writes; the repository is the working
+                                           directory
   items put --item <kind> <title> <body> [--item ...]
   items put --file <path> | items put < items.json
                                            write items for the current repo and branch; the file or
@@ -110,6 +120,10 @@ const TAP_HARNESSES = new Set(["claude-code", "codex", "cursor", "antigravity", 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+function installedVersion(): string {
+  return (JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")) as { version: string }).version;
 }
 
 const DEFAULT_BASE_URL = "https://api.meshpoint.dev";
@@ -179,8 +193,7 @@ async function main(argv: string[]): Promise<number> {
     case "--version":
     case "-v":
     case "version": {
-      const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")) as { version: string };
-      process.stdout.write(`${pkg.version}\n`);
+      process.stdout.write(`${installedVersion()}\n`);
       return 0;
     }
     case "login": {
@@ -248,8 +261,9 @@ async function main(argv: string[]): Promise<number> {
       else if (rest[0] === "pi") console.log(connectPi({ remove, ...(piDir ? { piDir } : {}) }));
       else if (rest[0] === "openclaw") console.log(connectOpenclaw({ remove }));
       else if (rest[0] === "opencode") console.log(connectOpencode({ remove, ...(configDir ? { configDir } : {}) }));
-      else throw new Error("connect supports: claude-code, codex, cursor, antigravity, pi, opencode, openclaw");
-      if (!remove) {
+      else if (rest[0] === "mcp") console.log(connectMcp({ remove, ...inProject }));
+      else throw new Error("connect supports: claude-code, codex, cursor, antigravity, pi, opencode, openclaw, mcp");
+      if (!remove && rest[0] !== "mcp") {
         // Past sessions for this repository are worth a line; the offer never fails the connect.
         try {
           const repo = repoContext(process.cwd());
@@ -280,6 +294,35 @@ async function main(argv: string[]): Promise<number> {
       const { missing, ...out } = await withAuth(config, (c) => putItems(drafts, { config: c, repo, checkpoints: new Checkpoints(stateDir()), touched: new Touched(stateDir()) }));
       for (const m of missing) console.error(`ref not found: ${m}`);
       console.log(JSON.stringify({ ...out, project: repo.project, branch: repo.branch }));
+      return 0;
+    }
+    case "mcp": {
+      const cwd = flag(rest, "--cwd") ?? process.cwd();
+      if (!path.isAbsolute(cwd)) throw new Error("--cwd must be an absolute path");
+      const stored = loadConfig();
+      const config = stored ? await freshConfig(stored).catch(() => stored) : null;
+      const repo = repoContext(cwd);
+      const tap =
+        config && repo
+          ? new Tap({
+              config,
+              repo,
+              session: `mcp-${randomUUID()}`,
+              spool: new Spool(spoolDir()),
+              checkpoints: new Checkpoints(stateDir()),
+              touched: new Touched(stateDir()),
+              cache: new SessionCache(stateDir()),
+              local: localChecks(repo.root),
+              refresh: () => freshConfig(config, { force: true }).catch(() => null),
+            })
+          : null;
+      const server = new McpServer({
+        name: MCP_SERVER_NAME,
+        version: installedVersion(),
+        instructions: MCP_INSTRUCTIONS,
+        tools: meshpointTools({ tap, cwd, config: requireConfig, checkpoints: new Checkpoints(stateDir()), touched: new Touched(stateDir()) }),
+      });
+      await server.serve(process.stdin, process.stdout);
       return 0;
     }
     case "export": {
